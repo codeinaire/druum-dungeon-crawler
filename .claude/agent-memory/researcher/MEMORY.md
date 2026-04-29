@@ -1,0 +1,2 @@
+- [Project overview](project_druum_overview.md) -- Bevy DRPG (first-person dungeon crawler RPG) project, Rust, targeting Bevy 0.18.x
+- [Bevy ecosystem reference](reference_bevy_ecosystem.md) -- Key crates, compatibility versions, and documentation URLs for Bevy 0.18

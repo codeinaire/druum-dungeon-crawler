@@ -1,0 +1,1 @@
+- [Druum project context](project_druum.md) — greenfield Bevy first-person dungeon crawler RPG; key architectural decisions and risk areas pre-implementation
