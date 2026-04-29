@@ -1,0 +1,1 @@
+- [Druum project skeleton decisions](project_druum_skeleton.md) — Bevy 0.18.1 pin/feature/profile choices applied in Feature #1 plan
