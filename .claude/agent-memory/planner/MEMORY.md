@@ -1,1 +1,2 @@
 - [Druum project skeleton decisions](project_druum_skeleton.md) — Bevy 0.18.1 pin/feature/profile choices applied in Feature #1 plan
+- [Druum state machine decisions](project_druum_state_machine.md) — Feature #2 GameState/SubStates layout, F9 dev hotkey gating, Message-vs-Event 0.18 trap
