@@ -1,4 +1,158 @@
-// Stub for Feature #3 — DungeonFloor has no fields yet.
-// Feature #4 adds the razor-wall grid; until then this file just verifies
-// the typed-RON loader registration works end-to-end.
-()
+// Test Floor 1 — hand-authored 6×6 layout for Feature #4.
+// Exercises every WallType variant and 5 CellFeatures variants.
+//
+// Layout (x increases rightward, y increases downward):
+//
+//   x:   0     1     2     3     4     5
+// y=0: [SSS] [S_S] [S_S] [S_S] [S_S] [SSS]   <- top outer edge (all Solid)
+// y=1: [S_S] [S+S] [SDS] [S_L] [S_S] [S_S]   <- entry=+ Door=D LockedDoor=L
+// y=2: [S_S] [S_S] [SsS] [S_S] [S_k] [k_S]   <- spinner=s SecretWall=k
+// y=3: [S_S] [S_S] [SiS] [SoS] [S_S] [S_S]   <- Illusory=i OneWay=o
+// y=4: [S_S] [S_S] [S_S] [S_S] [S?S] [STS]   <- Trap=? Teleporter=T
+// y=5: [SSS] [S_S] [S_S] [S_S] [S_S] [SSS]   <- bottom outer edge (all Solid)
+//
+// Wall consistency rules: every shared wall stored on both sides.
+// OneWay wall: east of (2,3) = OneWay; west of (3,3) = Solid (allowed asymmetry).
+//
+// Variant coverage:
+//   WallType::Open         — interior passages throughout
+//   WallType::Solid        — outer perimeter + specific interior walls
+//   WallType::Door         — east of (1,1) / west of (2,1)
+//   WallType::LockedDoor   — east of (3,1) / west of (4,1)
+//   WallType::SecretWall   — east of (4,2) / west of (5,2)
+//   WallType::OneWay       — east of (2,3) only; west of (3,3) = Solid
+//   WallType::Illusory     — west of (2,3) / east of (1,3)
+//   CellFeatures::spinner  — cell (2,2)
+//   CellFeatures::trap     — cell (4,4): Pit { damage:5, target_floor: Some(2) }
+//   CellFeatures::teleporter — cell (5,4): floor 2, (1,1), facing South
+//   CellFeatures::dark_zone  — cell (1,4)
+//   CellFeatures::anti_magic_zone — cell (2,4)
+
+(
+    name: "Test Floor 1",
+    width: 6,
+    height: 6,
+    floor_number: 1,
+    walls: [
+        // Row y=0: top outer edge — all cells sealed on N/W/E outer faces.
+        // Cells (0,0) and (5,0) are fully sealed corners (SSS).
+        // Cells (1,0)..(4,0) are sealed N/W/E but open south into y=1 row.
+        [
+            // (0,0): corner, all Solid
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (1,0): top edge, south=Open (connects to y=1 below)
+            (north: Solid, south: Open, east: Solid, west: Solid),
+            // (2,0): top edge, south=Open
+            (north: Solid, south: Open, east: Solid, west: Solid),
+            // (3,0): top edge, south=Open
+            (north: Solid, south: Open, east: Solid, west: Solid),
+            // (4,0): top edge, south=Open
+            (north: Solid, south: Open, east: Solid, west: Solid),
+            // (5,0): corner, all Solid
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+        ],
+        // Row y=1: first interior row.
+        // north of row y=1 = south of row y=0 (Open for x=1..4, Solid for x=0,5)
+        [
+            // (0,1): left edge
+            (north: Solid, south: Open, east: Open, west: Solid),
+            // (1,1): entry_point — open south and east (east leads to Door at (2,1))
+            (north: Open, south: Open, east: Door, west: Open),
+            // (2,1): east of Door from (1,1), west=Door; east=Open; south=Open
+            (north: Open, south: Open, east: Open, west: Door),
+            // (3,1): open east to LockedDoor boundary; west=Open
+            (north: Open, south: Open, east: LockedDoor, west: Open),
+            // (4,1): west=LockedDoor (from (3,1)); east=Solid (outer)
+            (north: Open, south: Open, east: Solid, west: LockedDoor),
+            // (5,1): right edge
+            (north: Solid, south: Open, east: Solid, west: Solid),
+        ],
+        // Row y=2:
+        // north of y=2 = south of y=1 (Open for x=0..5 interior)
+        [
+            // (0,2): left edge
+            (north: Open, south: Open, east: Open, west: Solid),
+            // (1,2): interior open
+            (north: Open, south: Open, east: Open, west: Open),
+            // (2,2): spinner cell — open all sides
+            (north: Open, south: Open, east: Open, west: Open),
+            // (3,2): interior open
+            (north: Open, south: Open, east: Open, west: Open),
+            // (4,2): SecretWall on east face (leads to (5,2))
+            (north: Open, south: Open, east: SecretWall, west: Open),
+            // (5,2): right edge; west=SecretWall (from (4,2)); east=Solid outer
+            (north: Open, south: Open, east: Solid, west: SecretWall),
+        ],
+        // Row y=3:
+        // north of y=3 = south of y=2 (Open)
+        [
+            // (0,3): left edge; dark_zone cell (features)
+            (north: Open, south: Open, east: Open, west: Solid),
+            // (1,3): east=Illusory (leads to (2,3))
+            (north: Open, south: Open, east: Illusory, west: Open),
+            // (2,3): west=Illusory (from (1,3)); east=OneWay
+            (north: Open, south: Open, east: OneWay, west: Illusory),
+            // (3,3): west=Solid (reverse of OneWay from (2,3) — allowed asymmetry)
+            (north: Open, south: Open, east: Open, west: Solid),
+            // (4,3): interior open
+            (north: Open, south: Open, east: Open, west: Open),
+            // (5,3): right edge
+            (north: Open, south: Open, east: Solid, west: Open),
+        ],
+        // Row y=4:
+        // north of y=4 = south of y=3 (Open)
+        [
+            // (0,4): left edge
+            (north: Open, south: Solid, east: Open, west: Solid),
+            // (1,4): dark_zone cell (features); south=Solid (bottom outer edge)
+            (north: Open, south: Solid, east: Open, west: Open),
+            // (2,4): anti_magic_zone cell (features); south=Solid
+            (north: Open, south: Solid, east: Open, west: Open),
+            // (3,4): interior; south=Solid
+            (north: Open, south: Solid, east: Open, west: Open),
+            // (4,4): trap cell (Pit); south=Solid
+            (north: Open, south: Solid, east: Open, west: Open),
+            // (5,4): teleporter cell; right edge; south=Solid
+            (north: Open, south: Solid, east: Solid, west: Open),
+        ],
+        // Row y=5: bottom outer edge
+        // north of y=5 = south of y=4 (Solid, set above)
+        [
+            // (0,5): corner, all Solid
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (1,5): bottom edge
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (2,5): bottom edge
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (3,5): bottom edge
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (4,5): bottom edge
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            // (5,5): corner, all Solid
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+        ],
+    ],
+    features: [
+        // Row y=0: no features
+        [(), (), (), (), (), ()],
+        // Row y=1: no features
+        [(), (), (), (), (), ()],
+        // Row y=2: spinner at (2,2)
+        [(), (), (spinner: true), (), (), ()],
+        // Row y=3: no features (dark_zone is at y=4 not y=3 per layout)
+        [(), (), (), (), (), ()],
+        // Row y=4: dark_zone at (1,4), anti_magic_zone at (2,4), trap at (4,4), teleporter at (5,4)
+        [
+            (),
+            (dark_zone: true),
+            (anti_magic_zone: true),
+            (),
+            (trap: Some(Pit(damage: 5, target_floor: Some(2)))),
+            (teleporter: Some((floor: 2, x: 1, y: 1, facing: Some(South)))),
+        ],
+        // Row y=5: no features
+        [(), (), (), (), (), ()],
+    ],
+    entry_point: (1, 1, North),
+    encounter_table: "test_table",
+)

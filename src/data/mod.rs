@@ -14,7 +14,9 @@ pub mod items;
 pub mod spells;
 
 pub use classes::ClassTable;
-pub use dungeon::DungeonFloor;
+pub use dungeon::{
+    CellFeatures, Direction, DungeonFloor, TeleportTarget, TrapType, WallMask, WallType,
+};
 pub use enemies::EnemyDb;
 pub use items::ItemDb;
 pub use spells::SpellTable;
