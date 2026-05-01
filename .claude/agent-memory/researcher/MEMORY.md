@@ -1,2 +1,5 @@
 - [Project overview](project_druum_overview.md) -- Bevy DRPG (first-person dungeon crawler RPG) project, Rust, targeting Bevy 0.18.x
 - [Bevy ecosystem reference](reference_bevy_ecosystem.md) -- Key crates, compatibility versions, and documentation URLs for Bevy 0.18
+- [Bevy 0.18.1 local source extraction](reference_bevy_0_18_local_source.md) -- Path to extracted Bevy 0.18.1 crate family on disk; primary source for HIGH-confidence verification under tooling limitations
+- [Bevy 0.18 Event vs Message split](feedback_bevy_0_18_event_message_split.md) -- StateTransitionEvent / AssetEvent are Messages in 0.18; use MessageReader, not EventReader
+- [Druum loading-state ownership](project_druum_loading_ownership.md) -- Feature #3 (LoadingPlugin) is the sole owner of GameState::Loading -> TitleScreen

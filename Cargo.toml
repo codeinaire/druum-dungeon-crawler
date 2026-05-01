@@ -19,12 +19,19 @@ bevy = { version = "=0.18.1", default-features = false, features = [
     # x11 is Linux-only — do NOT add for macOS-only dev. Use a target-cfg block
     # if/when Linux CI is added later.
 ] }
+bevy_common_assets = { version = "=0.16.0", features = ["ron"] }
+bevy_asset_loader  = "=0.26.0"
+# serde and ron are transitively present via Bevy but must be declared explicitly
+# in Rust 2024 edition to be usable as direct crate references in our source.
+serde = { version = "1", features = ["derive"] }
+ron   = "0.12"
 
 [features]
 default = []
-# Enable fast incremental rebuilds via Bevy dylib. NEVER include in release builds.
+# Enable fast incremental rebuilds via Bevy dylib + filesystem hot-reload of assets.
+# NEVER include in release builds.
 # Usage: `cargo run --features dev`
-dev = ["bevy/dynamic_linking"]
+dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 
 # Optimize transitive deps even in dev profile so Bevy renderer stays performant.
 [profile.dev.package."*"]
