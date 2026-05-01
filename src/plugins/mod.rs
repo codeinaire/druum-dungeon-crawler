@@ -5,5 +5,6 @@ pub mod combat;
 pub mod dungeon;
 pub mod party;
 pub mod save;
+pub mod state;
 pub mod town;
 pub mod ui;

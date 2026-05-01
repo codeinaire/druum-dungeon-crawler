@@ -1,0 +1,1 @@
+- [Bevy ButtonInput test — just_pressed persistence](feedback_bevy_test_just_pressed_persistence.md) — Without InputPlugin, just_pressed is never cleared between app.update() calls; tests can silently queue phantom transitions

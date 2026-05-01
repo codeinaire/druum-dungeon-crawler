@@ -1,0 +1,1 @@
+- [Bevy 0.18 test setup — ButtonInput](feedback_bevy_test_input_setup.md) — Use `init_resource::<ButtonInput<KeyCode>>()` not `InputPlugin` in tests where `just_pressed` must survive to Update

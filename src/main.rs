@@ -5,6 +5,7 @@ use druum::plugins::{
     dungeon::DungeonPlugin,
     party::PartyPlugin,
     save::SavePlugin,
+    state::StatePlugin,
     town::TownPlugin,
     ui::UiPlugin,
 };
@@ -13,6 +14,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
+            StatePlugin,    // must come after DefaultPlugins
             DungeonPlugin,
             CombatPlugin,
             PartyPlugin,
