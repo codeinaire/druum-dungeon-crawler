@@ -1,0 +1,4 @@
+// Stub for Feature #3 — DungeonFloor has no fields yet.
+// Feature #4 adds the razor-wall grid; until then this file just verifies
+// the typed-RON loader registration works end-to-end.
+()

@@ -1,1 +1,2 @@
 - [Bevy 0.18 test setup — ButtonInput](feedback_bevy_test_input_setup.md) — Use `init_resource::<ButtonInput<KeyCode>>()` not `InputPlugin` in tests where `just_pressed` must survive to Update
+- [Rust 2024 edition — transitive deps not usable without explicit declaration](feedback_rust_2024_transitive_deps.md) — In edition="2024", serde/ron/etc. must be in [dependencies] even if already transitive via Bevy
