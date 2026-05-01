@@ -1,8 +1,8 @@
 # Pipeline State
 
 **Task:** Drive the full pipeline (research → plan → implement → review) for Feature #2: Game State Machine from the dungeon crawler roadmap. Define `GameState`, three `SubStates` (`DungeonSubState`, `CombatPhase`, `TownLocation`), a `StatePlugin`, debug transition logger, OnEnter/OnExit stubs in dungeon/combat/town plugins, and an F9 hotkey to cycle states. Bevy =0.18.1, no new deps. Out of scope: asset loading, UI, leafwing input, gameplay.
-**Status:** in-progress
-**Last Completed Step:** 3
+**Status:** completed
+**Last Completed Step:** 5
 
 ## Artifacts
 
@@ -11,8 +11,8 @@
 | 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260429-030000-bevy-0-18-1-state-machine-feature-2.md |
 | 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260429-031500-bevy-0-18-1-state-machine-feature-2.md |
 | 3    | Implement   | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260429-173500-bevy-0-18-1-state-machine-feature-2.md |
-| 4    | Ship        | pending |
-| 5    | Code Review | pending |
+| 4    | Ship        | https://github.com/codeinaire/druum-dungeon-crawler/pull/2 (branch `2-game-state-machine`, commit `facb4c4`) |
+| 5    | Code Review | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260501-000000-bevy-0-18-1-state-machine-feature-2.md (verdict: APPROVE) |
 
 ## Implementation Notes
 
