@@ -133,7 +133,10 @@ fn default_menu_input_map() -> InputMap<MenuAction> {
 fn default_dungeon_input_map() -> InputMap<DungeonAction> {
     use DungeonAction::*;
     InputMap::default()
-        // Movement (WASD + arrows; arrows STRAFE per modern convention)
+        // Movement — WASD and arrow keys are parallel (identical coverage):
+        // W/ArrowUp = forward, S/ArrowDown = backward,
+        // A/ArrowLeft = strafe-left, D/ArrowRight = strafe-right.
+        // Q/E are turn-only; no arrow alternates for turning.
         .with(MoveForward, KeyCode::KeyW)
         .with(MoveForward, KeyCode::ArrowUp)
         .with(MoveBackward, KeyCode::KeyS)
@@ -142,7 +145,7 @@ fn default_dungeon_input_map() -> InputMap<DungeonAction> {
         .with(StrafeLeft, KeyCode::ArrowLeft)
         .with(StrafeRight, KeyCode::KeyD)
         .with(StrafeRight, KeyCode::ArrowRight)
-        // Turning (Q/E only — no arrow alternates to avoid overloading arrows)
+        // Turning
         .with(TurnLeft, KeyCode::KeyQ)
         .with(TurnRight, KeyCode::KeyE)
         // Interactions and UI hotkeys
