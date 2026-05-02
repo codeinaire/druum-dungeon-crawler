@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod combat;
 pub mod dungeon;
+pub mod input;
 pub mod loading;
 pub mod party;
 pub mod save;

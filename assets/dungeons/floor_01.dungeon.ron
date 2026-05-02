@@ -86,7 +86,7 @@
         // Row y=3:
         // north of y=3 = south of y=2 (Open)
         [
-            // (0,3): left edge
+            // (0,3): left edge; dark_zone cell (features)
             (north: Open, south: Open, east: Open, west: Solid),
             // (1,3): east=Illusory (leads to (2,3))
             (north: Open, south: Open, east: Illusory, west: Open),

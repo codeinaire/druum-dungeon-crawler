@@ -4,6 +4,7 @@ use druum::plugins::{
     audio::AudioPlugin,
     combat::CombatPlugin,
     dungeon::DungeonPlugin,
+    input::ActionsPlugin,
     loading::LoadingPlugin,
     party::PartyPlugin,
     save::SavePlugin,
@@ -28,6 +29,7 @@ fn main() {
                 ..default()
             }),
             StatePlugin,        // must come after DefaultPlugins
+            ActionsPlugin,      // sits next to LoadingPlugin in dependency order
             LoadingPlugin,      // must come after StatePlugin (uses GameState)
             DungeonPlugin,
             CombatPlugin,
