@@ -5,3 +5,4 @@
 - [Druum loading-state ownership](project_druum_loading_ownership.md) -- Feature #3 (LoadingPlugin) is the sole owner of GameState::Loading -> TitleScreen
 - [ron 0.11 vs 0.12 format equivalence](reference_ron_format_compat.md) -- For struct/enum/Option/Vec types, the two ron versions are byte-identical; verified by direct test-suite comparison; both extracted on disk
 - [Bevy 0.18 Reflect derive support](reference_bevy_reflect_018_derive.md) -- #[derive(Reflect)] handles enums (mixed variants), Vec<Vec<T>>, Option<T>, primitives, tuples — no #[reflect(...)] attributes needed for typical asset shapes
+- [Bevy 0.18 input tests — three layers](feedback_bevy_input_test_layers.md) -- Direct ButtonInput tests use init_resource bypass; leafwing ActionState tests REQUIRE full InputPlugin + KeyboardInput message injection; patterns are not interchangeable

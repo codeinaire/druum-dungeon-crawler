@@ -2,3 +2,5 @@
 - [Rust 2024 edition — transitive deps not usable without explicit declaration](feedback_rust_2024_transitive_deps.md) — In edition="2024", serde/ron/etc. must be in [dependencies] even if already transitive via Bevy
 - [serde attribute ordering — #[serde(default)] must follow #[derive(...)]](feedback_serde_default_attribute_ordering.md) — Placing serde container attrs before derive triggers legacy_derive_helpers (future hard error)
 - [Enum Default required when inside tuple field on Default-deriving struct](feedback_direction_default_for_tuple_derive.md) — Tuples derive Default only when all elements do; add #[default] variant to any enum used in such a tuple
+- [leafwing 0.20 — ActionState Resource requires explicit init_resource call](feedback_leafwing_action_state_resource.md) — InputManagerPlugin does NOT auto-insert ActionState; call init_resource::<ActionState<T>>() explicitly
+- [leafwing 0.20 — use Buttonlike::press() for test key injection](feedback_leafwing_test_press_api.md) — KeyCode::X.press(world) via prelude::* is cleaner than manual KeyboardInput construction
