@@ -1,2 +1,4 @@
 - [Bevy 0.18 test setup — ButtonInput](feedback_bevy_test_input_setup.md) — Use `init_resource::<ButtonInput<KeyCode>>()` not `InputPlugin` in tests where `just_pressed` must survive to Update
 - [Rust 2024 edition — transitive deps not usable without explicit declaration](feedback_rust_2024_transitive_deps.md) — In edition="2024", serde/ron/etc. must be in [dependencies] even if already transitive via Bevy
+- [serde attribute ordering — #[serde(default)] must follow #[derive(...)]](feedback_serde_default_attribute_ordering.md) — Placing serde container attrs before derive triggers legacy_derive_helpers (future hard error)
+- [Enum Default required when inside tuple field on Default-deriving struct](feedback_direction_default_for_tuple_derive.md) — Tuples derive Default only when all elements do; add #[default] variant to any enum used in such a tuple
