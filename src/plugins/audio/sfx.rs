@@ -82,6 +82,10 @@ pub fn handle_sfx_requests(
             SfxKind::MenuClick => audio_assets.sfx_menu_click.clone(),
             SfxKind::AttackHit => audio_assets.sfx_attack_hit.clone(),
         };
-        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN, super::Sfx));
+        commands.spawn((
+            AudioPlayer::new(handle),
+            PlaybackSettings::DESPAWN,
+            super::Sfx,
+        ));
     }
 }

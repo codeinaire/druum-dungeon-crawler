@@ -15,8 +15,8 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
-use druum::data::dungeon::Direction;
 use druum::data::DungeonFloor;
+use druum::data::dungeon::Direction;
 
 #[derive(AssetCollection, Resource)]
 struct TestAssets {

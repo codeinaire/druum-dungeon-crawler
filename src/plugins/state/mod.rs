@@ -78,12 +78,12 @@ fn cycle_game_state_on_f9(
         return;
     }
     let upcoming = match current.get() {
-        GameState::Loading     => GameState::TitleScreen,
+        GameState::Loading => GameState::TitleScreen,
         GameState::TitleScreen => GameState::Town,
-        GameState::Town        => GameState::Dungeon,
-        GameState::Dungeon     => GameState::Combat,
-        GameState::Combat      => GameState::GameOver,
-        GameState::GameOver    => GameState::Loading,
+        GameState::Town => GameState::Dungeon,
+        GameState::Dungeon => GameState::Combat,
+        GameState::Combat => GameState::GameOver,
+        GameState::GameOver => GameState::Loading,
     };
     next.set(upcoming);
 }
@@ -106,7 +106,10 @@ mod tests {
         #[cfg(feature = "dev")]
         app.init_resource::<ButtonInput<KeyCode>>();
         app.update();
-        assert_eq!(*app.world().resource::<State<GameState>>(), GameState::Loading);
+        assert_eq!(
+            *app.world().resource::<State<GameState>>(),
+            GameState::Loading
+        );
     }
 
     /// Pressing F9 advances `GameState` to the next variant in cycle order.

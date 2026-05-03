@@ -9,7 +9,9 @@ pub struct TownPlugin;
 
 impl Plugin for TownPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Town), || info!("Entered GameState::Town"))
-            .add_systems(OnExit(GameState::Town), || info!("Exited GameState::Town"));
+        app.add_systems(OnEnter(GameState::Town), || {
+            info!("Entered GameState::Town")
+        })
+        .add_systems(OnExit(GameState::Town), || info!("Exited GameState::Town"));
     }
 }

@@ -136,7 +136,10 @@ pub struct TeleportTarget {
 pub enum TrapType {
     /// Fall pit. `damage` is HP lost on trigger; `target_floor` is the floor
     /// the player lands on (or `None` for a dead-end pit).
-    Pit { damage: u32, target_floor: Option<u32> },
+    Pit {
+        damage: u32,
+        target_floor: Option<u32>,
+    },
     /// Poison gas cloud — applies poison status.
     Poison,
     /// Alarm trap — triggers a scripted encounter.
@@ -298,9 +301,15 @@ impl DungeonFloor {
     /// Default-constructed floors (zero-by-zero) return `true`.
     pub fn is_well_formed(&self) -> bool {
         self.walls.len() == self.height as usize
-            && self.walls.iter().all(|row| row.len() == self.width as usize)
+            && self
+                .walls
+                .iter()
+                .all(|row| row.len() == self.width as usize)
             && self.features.len() == self.height as usize
-            && self.features.iter().all(|row| row.len() == self.width as usize)
+            && self
+                .features
+                .iter()
+                .all(|row| row.len() == self.width as usize)
     }
 }
 
@@ -337,14 +346,8 @@ mod tests {
             width: w,
             height: h,
             floor_number: 1,
-            walls: vec![
-                vec![WallMask::default(); w as usize];
-                h as usize
-            ],
-            features: vec![
-                vec![CellFeatures::default(); w as usize];
-                h as usize
-            ],
+            walls: vec![vec![WallMask::default(); w as usize]; h as usize],
+            features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
         }
@@ -361,21 +364,20 @@ mod tests {
     fn dungeon_floor_round_trips_through_ron() {
         let original = DungeonFloor::default();
 
-        let serialized: String = ron::ser::to_string_pretty(
-            &original,
-            ron::ser::PrettyConfig::default(),
-        )
-        .expect("serialize");
+        let serialized: String =
+            ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
+                .expect("serialize");
 
         let parsed: DungeonFloor = ron::de::from_str(&serialized).expect("deserialize");
 
-        let reserialized: String = ron::ser::to_string_pretty(
-            &parsed,
-            ron::ser::PrettyConfig::default(),
-        )
-        .expect("re-serialize");
+        let reserialized: String =
+            ron::ser::to_string_pretty(&parsed, ron::ser::PrettyConfig::default())
+                .expect("re-serialize");
 
-        assert_eq!(serialized, reserialized, "RON round trip lost or reordered fields");
+        assert_eq!(
+            serialized, reserialized,
+            "RON round trip lost or reordered fields"
+        );
     }
 
     /// Round-trip a hand-built 2×2 `DungeonFloor` with multiple WallType and
@@ -440,7 +442,10 @@ mod tests {
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
             .expect("serialize");
         let parsed: DungeonFloor = ron::de::from_str(&serialized).expect("deserialize");
-        assert_eq!(original, parsed, "round-trip changed the DungeonFloor value");
+        assert_eq!(
+            original, parsed,
+            "round-trip changed the DungeonFloor value"
+        );
     }
 
     // -------------------------------------------------------------------------

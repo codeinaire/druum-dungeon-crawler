@@ -108,7 +108,7 @@ impl Plugin for LoadingPlugin {
                 LoadingState::new(GameState::Loading)
                     .continue_to_state(GameState::TitleScreen)
                     .load_collection::<DungeonAssets>()
-                    .load_collection::<AudioAssets>(),  // Feature #6 — sibling of DungeonAssets
+                    .load_collection::<AudioAssets>(), // Feature #6 — sibling of DungeonAssets
             )
             // (3) Loading-screen UI lifecycle. Camera2d + centered text
             //     are spawned on OnEnter(Loading) and despawned on
@@ -151,10 +151,7 @@ fn spawn_loading_screen(mut commands: Commands) {
 /// `Text` node is cleaned up automatically when its parent `Node` is
 /// despawned). The `Camera2d` is also despawned — the next feature that
 /// needs a camera will spawn its own.
-fn despawn_loading_screen(
-    mut commands: Commands,
-    roots: Query<Entity, With<LoadingScreenRoot>>,
-) {
+fn despawn_loading_screen(mut commands: Commands, roots: Query<Entity, With<LoadingScreenRoot>>) {
     for e in &roots {
         commands.entity(e).despawn();
     }

@@ -1,16 +1,9 @@
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use druum::plugins::{
-    audio::AudioPlugin,
-    combat::CombatPlugin,
-    dungeon::DungeonPlugin,
-    input::ActionsPlugin,
-    loading::LoadingPlugin,
-    party::PartyPlugin,
-    save::SavePlugin,
-    state::StatePlugin,
-    town::TownPlugin,
-    ui::UiPlugin,
+    audio::AudioPlugin, combat::CombatPlugin, dungeon::DungeonPlugin, input::ActionsPlugin,
+    loading::LoadingPlugin, party::PartyPlugin, save::SavePlugin, state::StatePlugin,
+    town::TownPlugin, ui::UiPlugin,
 };
 
 fn main() {
@@ -28,9 +21,9 @@ fn main() {
                 watch_for_changes_override: Some(cfg!(feature = "dev")),
                 ..default()
             }),
-            StatePlugin,        // must come after DefaultPlugins
-            ActionsPlugin,      // sits next to LoadingPlugin in dependency order
-            LoadingPlugin,      // must come after StatePlugin (uses GameState)
+            StatePlugin,   // must come after DefaultPlugins
+            ActionsPlugin, // sits next to LoadingPlugin in dependency order
+            LoadingPlugin, // must come after StatePlugin (uses GameState)
             DungeonPlugin,
             CombatPlugin,
             PartyPlugin,
