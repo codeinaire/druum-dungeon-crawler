@@ -6,3 +6,5 @@
 - [ron 0.11 vs 0.12 format equivalence](reference_ron_format_compat.md) -- For struct/enum/Option/Vec types, the two ron versions are byte-identical; verified by direct test-suite comparison; both extracted on disk
 - [Bevy 0.18 Reflect derive support](reference_bevy_reflect_018_derive.md) -- #[derive(Reflect)] handles enums (mixed variants), Vec<Vec<T>>, Option<T>, primitives, tuples — no #[reflect(...)] attributes needed for typical asset shapes
 - [Bevy 0.18 input tests — three layers](feedback_bevy_input_test_layers.md) -- Direct ButtonInput tests use init_resource bypass; leafwing ActionState tests REQUIRE full InputPlugin + KeyboardInput message injection; patterns are not interchangeable
+- [Bevy 0.18 "3d" umbrella pulls audio](reference_bevy_3d_umbrella_pulls_audio.md) -- bevy/3d transitively enables bevy_audio + vorbis (verified at bevy-0.18.1/Cargo.toml:2322-2366); Druum already has built-in audio + .ogg decode wired
+- [Bevy 0.18 soundtrack.rs canonical crossfade](reference_bevy_audio_soundtrack_example.md) -- Official state-driven BGM crossfade example using Volume::fade_towards + FadeIn/FadeOut components; the pattern Druum's Feature #6 should mirror

@@ -4,3 +4,5 @@
 - [Enum Default required when inside tuple field on Default-deriving struct](feedback_direction_default_for_tuple_derive.md) — Tuples derive Default only when all elements do; add #[default] variant to any enum used in such a tuple
 - [leafwing 0.20 — ActionState Resource requires explicit init_resource call](feedback_leafwing_action_state_resource.md) — InputManagerPlugin does NOT auto-insert ActionState; call init_resource::<ActionState<T>>() explicitly
 - [leafwing 0.20 — use Buttonlike::press() for test key injection](feedback_leafwing_test_press_api.md) — KeyCode::X.press(world) via prelude::* is cleaner than manual KeyboardInput construction
+- [--features dev + StatePlugin in tests — must init ButtonInput<KeyCode>](feedback_dev_feature_buttoninput_in_tests.md) — Any test app with StatePlugin under --features dev must call #[cfg(feature="dev")] app.init_resource::<ButtonInput<KeyCode>>()
+- [ffmpeg 8.x — Vorbis .ogg requires -strict -2, not libvorbis](feedback_ffmpeg_vorbis_strict_flag.md) — Use `-c:a vorbis -strict -2` for .ogg; libvorbis absent from homebrew ffmpeg 8.x; libopus produces Opus not Vorbis (lewton won't decode)
