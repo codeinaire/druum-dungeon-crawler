@@ -34,6 +34,15 @@ Edits while in `GameState::Loading` re-poll the asset collection. Edits during g
 
 Bevy's `AssetPlugin::default()` sets `unapproved_path_mode = UnapprovedPathMode::Forbid`, which blocks loads from outside this `assets/` folder. **Do not change this default.** Loading RON from user-supplied paths (e.g. mod files, save imports) opens path-traversal and parser-DoS risks.
 
+## Audio assets
+
+| Folder | Files | Type | Loaded via |
+|--------|-------|------|------------|
+| `audio/bgm/` | `{town,dungeon,combat,title,gameover}.ogg` | `bevy::audio::AudioSource` | `AudioAssets` collection in `src/plugins/loading/mod.rs` |
+| `audio/sfx/` | `{footstep,door,encounter_sting,menu_click,attack_hit}.ogg` | `bevy::audio::AudioSource` | `AudioAssets` collection in `src/plugins/loading/mod.rs` |
+
+All 10 files are 1-second silent placeholders (Vorbis, 44.1kHz stereo, ~5 KB each), generated via the §RQ9 recipe in `project/research/20260501-235930-feature-6-audio-system.md`. They are valid .ogg (rodio's lewton decoder accepts them) but produce no audio output. Real audible BGM/SFX lands in Feature #25 audio-polish via `git mv` + content swap.
+
 ## Trust model
 
 The RON files in this directory are fixed at build time and shipped with the binary. They are trusted input. If future features (e.g. dungeon editor, mod support) load RON from outside `assets/`, they must add validation: depth/size limits on the parser, allow-list checks on paths, and an explicit re-evaluation of the trust boundary.

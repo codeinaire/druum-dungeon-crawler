@@ -40,6 +40,41 @@ pub struct DungeonAssets {
     pub spell_table: Handle<SpellTable>,
 }
 
+/// Audio asset handles populated by `bevy_asset_loader` once all .ogg files
+/// finish loading. Kept separate from `DungeonAssets` so a missing audio
+/// file does not block dungeon-data tests (research §RQ5).
+///
+/// Both derives are required: `AssetCollection` for the loading-state
+/// machinery, `Resource` so `bevy_asset_loader` can `commands.insert_resource`
+/// the populated value. Same trap as `DungeonAssets`.
+#[derive(AssetCollection, Resource)]
+pub struct AudioAssets {
+    // BGM tracks — one per GameState that has music. GameState::Loading has
+    // no entry; play_bgm_for_state returns early on Loading (no music while
+    // assets resolve).
+    #[asset(path = "audio/bgm/town.ogg")]
+    pub bgm_town: Handle<AudioSource>,
+    #[asset(path = "audio/bgm/dungeon.ogg")]
+    pub bgm_dungeon: Handle<AudioSource>,
+    #[asset(path = "audio/bgm/combat.ogg")]
+    pub bgm_combat: Handle<AudioSource>,
+    #[asset(path = "audio/bgm/title.ogg")]
+    pub bgm_title: Handle<AudioSource>,
+    #[asset(path = "audio/bgm/gameover.ogg")]
+    pub bgm_gameover: Handle<AudioSource>,
+    // SFX — one per SfxKind variant in src/plugins/audio/sfx.rs.
+    #[asset(path = "audio/sfx/footstep.ogg")]
+    pub sfx_footstep: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/door.ogg")]
+    pub sfx_door: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/encounter_sting.ogg")]
+    pub sfx_encounter_sting: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/menu_click.ogg")]
+    pub sfx_menu_click: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/attack_hit.ogg")]
+    pub sfx_attack_hit: Handle<AudioSource>,
+}
+
 /// Marker tag on every entity spawned by `spawn_loading_screen`.
 /// `despawn_loading_screen` queries this to clean up on `OnExit`.
 #[derive(Component)]
@@ -72,7 +107,8 @@ impl Plugin for LoadingPlugin {
             .add_loading_state(
                 LoadingState::new(GameState::Loading)
                     .continue_to_state(GameState::TitleScreen)
-                    .load_collection::<DungeonAssets>(),
+                    .load_collection::<DungeonAssets>()
+                    .load_collection::<AudioAssets>(),  // Feature #6 — sibling of DungeonAssets
             )
             // (3) Loading-screen UI lifecycle. Camera2d + centered text
             //     are spawned on OnEnter(Loading) and despawned on

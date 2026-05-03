@@ -3,3 +3,4 @@
 - [Druum asset pipeline decisions](project_druum_asset_pipeline.md) — Feature #3 LoadingPlugin ownership, assets/ layout, hot-reload gating, data re-export exception
 - [Druum dungeon grid decisions](project_druum_dungeon_grid.md) — Feature #4 razor-wall double-storage + validator, y-down convention, struct-of-optionals CellFeatures, can_move matrix, tests/ directory for integration tests
 - [Druum input system decisions](project_druum_input_system.md) — Feature #5 ActionsPlugin name, 3-enum (MenuAction/DungeonAction/CombatAction) per-context shape, no-run_if-on-plugin trap, F9 carve-out, full-InputPlugin+Messages<KeyboardInput> test pattern
+- [Druum audio system decisions](project_druum_audio_system.md) — Feature #6 roadmap deviation (built-in bevy_audio over kira), marker-component channels, Message<SfxRequest> trigger API, AudioAssets separate from DungeonAssets, audio_output_available headless CI gate, FADE_SECS = 1.0
