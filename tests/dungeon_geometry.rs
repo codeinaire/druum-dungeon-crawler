@@ -1,5 +1,9 @@
 //! App-level integration test for Feature #8: 3D Dungeon Renderer.
 //!
+//! Note: Feature #9 added per-cell torch entities during development but
+//! removed them before merge (scope reduction). The carried torch is a child
+//! of `DungeonCamera` and is not tagged `DungeonGeometry`. Count remains 120.
+//!
 //! Verifies that `spawn_dungeon_geometry` correctly spawns 120 entities tagged
 //! with `DungeonGeometry` when `GameState::Dungeon` is entered with a loaded
 //! `floor_01`. The math:
@@ -13,8 +17,9 @@
 //!
 //!   Total: 36 + 36 + 48 = 120.
 //!
-//! Note: the player PointLight is a child of DungeonCamera (child of PlayerParty),
-//! NOT tagged DungeonGeometry, so it does not appear in this count.
+//! Note: the player PointLight (carried torch) is a child of DungeonCamera
+//! (NOT tagged DungeonGeometry — cleaned via PlayerParty parent), so it does
+//! NOT appear in this count.
 //!
 //! Uses the same TestState pattern as tests/dungeon_movement.rs — drives its own
 //! TestState::Loading -> TestState::Loaded cycle using only DungeonFloor (not
@@ -136,7 +141,8 @@ fn setup_dungeon_assets_and_enter(
 ///
 /// Count breakdown for floor_01 (6×6 grid):
 ///   36 floor tiles + 36 ceiling tiles + 48 wall plates = 120.
-/// The player PointLight is a child of DungeonCamera (not DungeonGeometry tagged).
+/// The player PointLight (carried torch) is a child of DungeonCamera
+/// (NOT tagged DungeonGeometry — cleaned via PlayerParty parent).
 fn assert_dungeon_geometry_count(
     mut done: ResMut<AssertDone>,
     query: Query<&DungeonGeometry>,

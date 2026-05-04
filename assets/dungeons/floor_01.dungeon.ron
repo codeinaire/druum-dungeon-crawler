@@ -155,4 +155,10 @@
     ],
     entry_point: (1, 1, North),
     encounter_table: "test_table",
+    // Feature #9 — per-floor atmosphere. Warm dark fog at low density;
+    // ambient stays at #8's near-black so torches dominate.
+    lighting: (
+        fog: (color: (0.10, 0.09, 0.08), density: 0.12),
+        ambient_brightness: 1.0,
+    ),
 )

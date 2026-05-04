@@ -11,3 +11,6 @@
 - [Integration tests — avoid LoadingPlugin, use TestState + TestFloorAssets](feedback_integration_test_avoid_loadingplugin.md) — LoadingPlugin loads .ogg files which hang headless tests; mirror dungeon_floor_loads.rs pattern
 - [OnEnter Commands are deferred — assertions need Update system not OnEnter](feedback_onenter_commands_deferred.md) — Entities spawned via Commands in OnEnter(S) are not visible to another OnEnter(S) system
 - [Rust 2024 let-chains — clippy collapsible_if with nested if-let guards](feedback_let_chain_collapsible_if.md) — Use `if outer && let Some(x) = expr` instead of nested `if outer { if let Some(x) = ... }` in edition="2024"
+- [clippy::manual_range_contains — use .contains() not comparison chain](feedback_clippy_manual_range_contains.md) — Use `(lo..=hi).contains(&x)` instead of `x >= lo && x <= hi`; manual_range_contains is enabled under -D warnings
+- [DistanceFog and FogFalloff require explicit bevy::pbr import](feedback_bevy_pbr_fog_explicit_import.md) — Add `use bevy::pbr::{DistanceFog, FogFalloff};` explicitly; prelude does not bring them into scope reliably
+- [clippy::doc_lazy_continuation — continuation lines after doc bullet lists need indentation](feedback_doc_lazy_continuation.md) — Bare continuation lines after `//!` bullet lists trigger doc_lazy_continuation; use new list item or blank separator line
