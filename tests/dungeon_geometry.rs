@@ -11,8 +11,8 @@
 //!       * 22 west walls renderable (outer left column + interior doors/special walls)
 //!       *  6 south walls (bottom row y=5, all Solid — outer edge)
 //!       *  6 east walls (right column x=5, all Solid — outer edge)
-//!   Plus per-cell torches from `floor.light_positions` (Feature #9):
-//!     - 4 cell torches authored in floor_01.dungeon.ron (1 entry + 1 east + 1 mage-blue + 1 trap)
+//!   - 4 cell torches from `floor.light_positions` (Feature #9):
+//!       * 4 torches authored in floor_01.dungeon.ron (1 entry + 1 east + 1 mage-blue + 1 trap)
 //!
 //!   Total: 36 + 36 + 48 + 4 = 124.
 //!
