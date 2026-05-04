@@ -1,6 +1,7 @@
 //! App-level integration test for Feature #8: 3D Dungeon Renderer.
+//! Updated in Feature #9 to account for 4 cell torches from floor_01.light_positions.
 //!
-//! Verifies that `spawn_dungeon_geometry` correctly spawns 120 entities tagged
+//! Verifies that `spawn_dungeon_geometry` correctly spawns 124 entities tagged
 //! with `DungeonGeometry` when `GameState::Dungeon` is entered with a loaded
 //! `floor_01`. The math:
 //!   - 36 floor tiles (one per cell, 6×6 grid)
@@ -10,11 +11,14 @@
 //!       * 22 west walls renderable (outer left column + interior doors/special walls)
 //!       *  6 south walls (bottom row y=5, all Solid — outer edge)
 //!       *  6 east walls (right column x=5, all Solid — outer edge)
+//!   Plus per-cell torches from `floor.light_positions` (Feature #9):
+//!     - 4 cell torches authored in floor_01.dungeon.ron (1 entry + 1 east + 1 mage-blue + 1 trap)
 //!
-//!   Total: 36 + 36 + 48 = 120.
+//!   Total: 36 + 36 + 48 + 4 = 124.
 //!
-//! Note: the player PointLight is a child of DungeonCamera (child of PlayerParty),
-//! NOT tagged DungeonGeometry, so it does not appear in this count.
+//! Note: the player PointLight (carried torch) is a child of DungeonCamera
+//! (NOT tagged DungeonGeometry — cleaned via PlayerParty parent), so it does
+//! NOT appear in this count.
 //!
 //! Uses the same TestState pattern as tests/dungeon_movement.rs — drives its own
 //! TestState::Loading -> TestState::Loaded cycle using only DungeonFloor (not
@@ -131,12 +135,14 @@ fn setup_dungeon_assets_and_enter(
     next_game_state.set(GameState::Dungeon);
 }
 
-/// Run-once Update system: count `DungeonGeometry` entities, assert == 120,
+/// Run-once Update system: count `DungeonGeometry` entities, assert == 124,
 /// then write `AppExit::Success`.
 ///
 /// Count breakdown for floor_01 (6×6 grid):
-///   36 floor tiles + 36 ceiling tiles + 48 wall plates = 120.
-/// The player PointLight is a child of DungeonCamera (not DungeonGeometry tagged).
+///   36 floor tiles + 36 ceiling tiles + 48 wall plates + 4 torches = 124.
+/// The 4 torches come from floor_01.light_positions (Feature #9).
+/// The player PointLight (carried torch) is a child of DungeonCamera
+/// (NOT tagged DungeonGeometry — cleaned via PlayerParty parent).
 fn assert_dungeon_geometry_count(
     mut done: ResMut<AssertDone>,
     query: Query<&DungeonGeometry>,
@@ -149,10 +155,12 @@ fn assert_dungeon_geometry_count(
 
     let count = query.iter().count();
     assert_eq!(
-        count, 120,
-        "Geometry entity count for floor_01 must equal 36 floor + 36 ceiling + 48 walls = 120. \
+        count, 124,
+        "Geometry entity count for floor_01 must equal 36 floor + 36 ceiling + 48 walls \
+         + 4 torches (Feature #9 light_positions) = 124. \
          If this assertion fails after an asset edit, recount per the canonical iteration rule \
-         (north + west of every cell, plus south of bottom row, plus east of right column)."
+         (north + west of every cell, plus south of bottom row, plus east of right column) \
+         AND verify floor_01.light_positions.len()."
     );
 
     exit.write(AppExit::Success);
