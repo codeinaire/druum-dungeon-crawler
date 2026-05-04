@@ -9,7 +9,11 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Combat), || info!("Entered GameState::Combat"))
-            .add_systems(OnExit(GameState::Combat), || info!("Exited GameState::Combat"));
+        app.add_systems(OnEnter(GameState::Combat), || {
+            info!("Entered GameState::Combat")
+        })
+        .add_systems(OnExit(GameState::Combat), || {
+            info!("Exited GameState::Combat")
+        });
     }
 }

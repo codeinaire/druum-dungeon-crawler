@@ -95,7 +95,7 @@ impl Default for ChannelVolumes {
     }
 }
 
-pub use bgm::{FadeIn, FadeOut, FADE_SECS};
+pub use bgm::{FADE_SECS, FadeIn, FadeOut};
 pub use sfx::{SfxKind, SfxRequest};
 
 /// Druum's audio plugin. Wires up channel markers, ChannelVolumes,
@@ -213,8 +213,7 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(
-            count,
-            1,
+            count, 1,
             "expected exactly one Bgm entity after entering Town state"
         );
     }
@@ -330,10 +329,7 @@ mod tests {
         // expected shape after spawn). On real hardware, the despawn arm
         // of fade_out_tick runs after time accumulates; we cannot verify
         // that path in a headless test.
-        let has_fade_out = app
-            .world()
-            .entity(entity)
-            .contains::<super::bgm::FadeOut>();
+        let has_fade_out = app.world().entity(entity).contains::<super::bgm::FadeOut>();
         assert!(
             has_fade_out,
             "FadeOut should be present on freshly-spawned entity"

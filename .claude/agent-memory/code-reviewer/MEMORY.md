@@ -1,2 +1,3 @@
 - [Bevy ButtonInput test — just_pressed persistence](feedback_bevy_test_just_pressed_persistence.md) — Without InputPlugin, just_pressed is never cleared between app.update() calls; tests can silently queue phantom transitions
 - [Ron version split — bevy_common_assets 0.11 vs project 0.12](feedback_ron_version_split.md) — bevy_common_assets 0.16.0 uses ron 0.11; project uses ron 0.12; round-trip tests must verify format compatibility when real fields are added (Feature #4+)
+- [Bevy 0.18 despawn() is recursive](feedback_bevy_018_despawn_is_recursive.md) — commands.entity(e).despawn() in 0.18 recursively despawns all children; do not flag parent despawns as missing child cleanup

@@ -196,8 +196,8 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             StatesPlugin, // ActionsPlugin doesn't use States directly, but
-                          // future cross-plugin tests will — keep the test
-                          // setup symmetrical with the injection tests below.
+            // future cross-plugin tests will — keep the test
+            // setup symmetrical with the injection tests below.
             InputPlugin,
             ActionsPlugin,
         ));
@@ -224,7 +224,8 @@ mod tests {
             "ActionState<MenuAction> should be registered by ActionsPlugin"
         );
         assert!(
-            app.world().contains_resource::<ActionState<DungeonAction>>(),
+            app.world()
+                .contains_resource::<ActionState<DungeonAction>>(),
             "ActionState<DungeonAction> should be registered by ActionsPlugin"
         );
         assert!(
@@ -239,7 +240,7 @@ mod tests {
         let mut app = make_test_app();
         KeyCode::KeyW.press(app.world_mut());
         app.update(); // keyboard_input_system reads message → ButtonInput populated
-                      // → leafwing maps → ActionState<DungeonAction> updated.
+        // → leafwing maps → ActionState<DungeonAction> updated.
 
         let action_state = app.world().resource::<ActionState<DungeonAction>>();
         assert!(

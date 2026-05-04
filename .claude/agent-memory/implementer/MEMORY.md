@@ -6,3 +6,7 @@
 - [leafwing 0.20 — use Buttonlike::press() for test key injection](feedback_leafwing_test_press_api.md) — KeyCode::X.press(world) via prelude::* is cleaner than manual KeyboardInput construction
 - [--features dev + StatePlugin in tests — must init ButtonInput<KeyCode>](feedback_dev_feature_buttoninput_in_tests.md) — Any test app with StatePlugin under --features dev must call #[cfg(feature="dev")] app.init_resource::<ButtonInput<KeyCode>>()
 - [ffmpeg 8.x — Vorbis .ogg requires -strict -2, not libvorbis](feedback_ffmpeg_vorbis_strict_flag.md) — Use `-c:a vorbis -strict -2` for .ogg; libvorbis absent from homebrew ffmpeg 8.x; libopus produces Opus not Vorbis (lewton won't decode)
+- [3D spawn systems in tests — must init_asset Mesh + StandardMaterial](feedback_test_mesh_assets_init.md) — MinimalPlugins lacks PbrPlugin; call init_asset::<Mesh>().init_asset::<StandardMaterial>() in test setup
+- [MessageWriter<T> needs app.add_message in tests without owning plugin](feedback_message_writer_needs_registration.md) — SfxRequest must be registered even when AudioPlugin is absent from test app
+- [Integration tests — avoid LoadingPlugin, use TestState + TestFloorAssets](feedback_integration_test_avoid_loadingplugin.md) — LoadingPlugin loads .ogg files which hang headless tests; mirror dungeon_floor_loads.rs pattern
+- [OnEnter Commands are deferred — assertions need Update system not OnEnter](feedback_onenter_commands_deferred.md) — Entities spawned via Commands in OnEnter(S) are not visible to another OnEnter(S) system
