@@ -10,3 +10,4 @@
 - [Bevy 0.18 soundtrack.rs canonical crossfade](reference_bevy_audio_soundtrack_example.md) -- Official state-driven BGM crossfade example using Volume::fade_towards + FadeIn/FadeOut components; the pattern Druum's Feature #6 should mirror
 - [Bevy 0.18 Camera3d/lights are components, not bundles](reference_bevy_018_camera3d_components.md) -- Camera3dBundle/PointLightBundle GONE in 0.18; spawn as component tuples with #[require(...)] auto-attaching deps
 - [Bevy 0.18 TimeUpdateStrategy for deterministic test time](reference_bevy_018_time_update_strategy.md) -- TimeUpdateStrategy::ManualDuration(d) advances Time::delta by exactly d per app.update(); the test-friendly mode for animation/tween/fade tests
+- [Bevy 0.18 mesh + lighting gotchas](reference_bevy_018_mesh_lighting_gotchas.md) -- Plane3d single-sided, Cuboid::new takes full lengths (not half), AmbientLight is per-camera Component while GlobalAmbientLight is the resource (0.18 change traps older docs)

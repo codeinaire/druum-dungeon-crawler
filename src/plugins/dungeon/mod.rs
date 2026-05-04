@@ -1,11 +1,17 @@
-//! Dungeon exploration plugin — Feature #7: grid movement + first-person camera.
+//! Dungeon exploration plugin — Feature #7: grid movement + first-person camera;
+//! Feature #8: 3D dungeon geometry renderer.
 //!
 //! ## Role
 //!
-//! This module is the primary home for Feature #7's end-to-end gameplay loop:
+//! This module is the primary home for the dungeon gameplay loop:
 //! - `PlayerParty` entity with child `Camera3d` at eye height.
-//! - `OnEnter(GameState::Dungeon)` spawn at `floor.entry_point`.
-//! - `OnExit(GameState::Dungeon)` despawn (recursive — children cleaned up automatically).
+//! - A `PointLight` child of `DungeonCamera` — Wizardry-style torchlight: dark
+//!   perimeter, walls fade with distance, oppressive atmosphere. The light follows
+//!   the player automatically because it is a child of `DungeonCamera`.
+//! - `OnEnter(GameState::Dungeon)` spawn at `floor.entry_point` + real dungeon
+//!   geometry (floor/ceiling slabs + wall plates from `DungeonFloor::walls`).
+//! - `OnExit(GameState::Dungeon)` despawn (recursive for children; `DungeonGeometry`
+//!   tag for standalone geometry entities).
 //! - `handle_dungeon_input` translates `Res<ActionState<DungeonAction>>` into grid
 //!   moves gated by `DungeonFloor::can_move`.
 //! - `MovementAnimation` tween component (0.18s translate / 0.15s rotate, smoothstep).
@@ -18,9 +24,7 @@
 //! `+grid_y → +world_z`. With `Direction::North = (0, -1)` (y-down grid convention
 //! from `src/data/dungeon.rs`), North movement decrements `grid_y` → `-Z` world motion
 //! → matches Bevy's default camera-looking direction. A camera facing North uses
-//! `Quat::IDENTITY`. The `data/dungeon.rs:18` doc-comment that says `-grid_y` is
-//! forward-looking conjecture from Feature #4 that this module supersedes; do NOT
-//! modify `data/dungeon.rs`.
+//! `Quat::IDENTITY`.
 //!
 //! ## Logical vs visual state
 //!
@@ -33,7 +37,7 @@ use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 
 use crate::data::DungeonFloor;
-use crate::data::dungeon::Direction;
+use crate::data::dungeon::{Direction, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
@@ -48,15 +52,28 @@ use crate::plugins::state::{DungeonSubState, GameState};
 pub const CELL_SIZE: f32 = 2.0;
 
 /// Local Y offset of the `Camera3d` child relative to the `PlayerParty` root.
-/// 0.7 produces a "forward-facing" feel relative to Feature #8's planned 3.0
-/// wall height.
-pub const EYE_HEIGHT: f32 = 0.7;
+/// 1.8 places the eye at 3/5 of the 3.0 cell height — natural human-eye-level
+/// for a 1st-person crawler. Tuned during Feature #8 manual smoke (originally
+/// 0.7 felt waist-level).
+pub const EYE_HEIGHT: f32 = 1.8;
 
 /// Duration of a forward/backward/strafe translation tween (seconds).
 pub const MOVE_DURATION_SECS: f32 = 0.18;
 
 /// Duration of a turn-left/turn-right rotation tween (seconds).
 pub const TURN_DURATION_SECS: f32 = 0.15;
+
+/// Wall height in world units. With `CELL_SIZE = 2.0` this gives a 1.5×
+/// wall-to-corridor ratio — claustrophobic Wizardry feel.
+pub const CELL_HEIGHT: f32 = 3.0;
+
+/// Wall plate thickness in world units. Non-zero to avoid degenerate-volume
+/// `Cuboid`s (zero thickness produces undefined normals); 0.05 is invisible at
+/// typical viewing distances and avoids z-fighting with adjacent floor/ceiling slabs.
+pub const WALL_THICKNESS: f32 = 0.05;
+
+/// Floor + ceiling slab thickness. Same value as `WALL_THICKNESS` for consistency.
+pub const FLOOR_THICKNESS: f32 = 0.05;
 
 // ---------------------------------------------------------------------------
 // Components
@@ -134,11 +151,12 @@ impl MovementAnimation {
     }
 }
 
-/// Marker tag on every entity spawned by `spawn_test_scene`.
-/// Feature #8 deletes the entire `spawn_test_scene` function, this component,
-/// and the `despawn_dungeon_entities` query for it in one PR.
+/// Marker on every entity spawned by `spawn_dungeon_geometry`: floor tiles,
+/// ceiling tiles, and wall plates. The `OnExit` cleanup walks this query to
+/// despawn all dungeon geometry on state transition out of `GameState::Dungeon`.
+/// Replaces Feature #7's `TestSceneMarker` (deleted in Feature #8).
 #[derive(Component, Debug, Clone, Copy)]
-pub struct TestSceneMarker;
+pub struct DungeonGeometry;
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -171,7 +189,7 @@ impl Plugin for DungeonPlugin {
         app.add_message::<MovedEvent>()
             .add_systems(
                 OnEnter(GameState::Dungeon),
-                (spawn_party_and_camera, spawn_test_scene),
+                (spawn_party_and_camera, spawn_dungeon_geometry),
             )
             .add_systems(OnExit(GameState::Dungeon), despawn_dungeon_entities)
             .add_systems(
@@ -184,6 +202,14 @@ impl Plugin for DungeonPlugin {
                         .before(animate_movement),
                     animate_movement.run_if(in_state(GameState::Dungeon)),
                 ),
+            );
+
+        #[cfg(feature = "dev")]
+        app.add_systems(OnEnter(GameState::Dungeon), spawn_debug_grid_hud)
+            .add_systems(OnExit(GameState::Dungeon), despawn_debug_grid_hud)
+            .add_systems(
+                Update,
+                update_debug_grid_hud.run_if(in_state(GameState::Dungeon)),
             );
     }
 }
@@ -221,12 +247,60 @@ fn facing_to_quat(facing: Direction) -> Quat {
     Quat::from_rotation_y(angle)
 }
 
+/// Returns the world-space `Transform` for a wall plate on the given cell's given face.
+///
+/// Cell `(grid_x, grid_y)` has center at world `(grid_x * CELL_SIZE, 0.0, grid_y * CELL_SIZE)`
+/// (per `grid_to_world`'s convention; `world_y = 0.0` is floor level). Each wall plate is
+/// positioned at the cell's edge (offset ±CELL_SIZE / 2 in world X or Z), centered vertically
+/// at `world_y = CELL_HEIGHT / 2`.
+///
+/// Wall meshes are pre-oriented (NS = X-extending, EW = Z-extending), so all four directions
+/// share `Quat::IDENTITY` rotation; the caller picks the right mesh handle for the direction.
+fn wall_transform(grid_x: u32, grid_y: u32, dir: Direction) -> Transform {
+    let cx = grid_x as f32 * CELL_SIZE;
+    let cz = grid_y as f32 * CELL_SIZE;
+    let cy = CELL_HEIGHT / 2.0;
+    let half = CELL_SIZE / 2.0;
+    let translation = match dir {
+        Direction::North => Vec3::new(cx, cy, cz - half),
+        Direction::South => Vec3::new(cx, cy, cz + half),
+        Direction::East => Vec3::new(cx + half, cy, cz),
+        Direction::West => Vec3::new(cx - half, cy, cz),
+    };
+    Transform::from_translation(translation)
+}
+
+/// Maps `WallType` to its rendering material. Returns `None` for variants that have
+/// no geometry (`Open | OneWay`).
+///
+/// `Solid`, `SecretWall`, and `Illusory` all share the solid-wall material — the player
+/// cannot visually distinguish them in v1; the reveal mechanic is Feature #13's scope.
+fn wall_material(
+    wt: WallType,
+    solid: &Handle<StandardMaterial>,
+    door: &Handle<StandardMaterial>,
+    locked: &Handle<StandardMaterial>,
+) -> Option<Handle<StandardMaterial>> {
+    match wt {
+        WallType::Open | WallType::OneWay => None,
+        WallType::Solid | WallType::SecretWall | WallType::Illusory => Some(solid.clone()),
+        WallType::Door => Some(door.clone()),
+        WallType::LockedDoor => Some(locked.clone()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
 
 /// `OnEnter(GameState::Dungeon)` — spawn the `PlayerParty` root entity at
 /// `floor.entry_point`, with a child `Camera3d` at eye height.
+///
+/// The `Camera3d` entity carries a child `PointLight` implementing Wizardry-style
+/// torchlight: a warm point source that illuminates cells near the player while
+/// distant corridors fade to near-black. Because the light is a grandchild of
+/// `PlayerParty`, it is despawned recursively when `PlayerParty` is cleaned up on
+/// `OnExit(GameState::Dungeon)`.
 ///
 /// Tolerant of missing assets: logs a warning and returns silently if
 /// `DungeonAssets` or the floor handle is not yet ready (e.g., if F9 forces
@@ -260,6 +334,20 @@ fn spawn_party_and_camera(
             Camera3d::default(),
             Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
             DungeonCamera,
+            // Wizardry-style torch: warm point light at the camera's eye position.
+            // Positioned at the camera origin (local (0,0,0)) — slightly forward/below
+            // adjustments can be made in Feature #25 polish if a "held torch" offset is
+            // desired. Despawned recursively with PlayerParty on OnExit(Dungeon).
+            children![(
+                PointLight {
+                    color: Color::srgb(1.0, 0.85, 0.55), // warm yellow-orange torch flame
+                    intensity: 60_000.0, // bright torch — overpowers near-black ambient
+                    range: 12.0,        // ~6 cells of light radius
+                    shadows_enabled: false, // shadows are Feature #9
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            )],
         )],
     ));
 
@@ -269,99 +357,195 @@ fn spawn_party_and_camera(
     );
 }
 
-/// `OnEnter(GameState::Dungeon)` — spawn placeholder test-scene geometry so
-/// camera movement is visually verifiable.
-///
-/// Spawns 3 colored cubes relative to `floor_01.entry_point = (1, 1, North)`:
-/// - Red: 2 cells north of entry (directly in front of the initial camera view).
-/// - Blue: 2 cells east of entry.
-/// - Green: 2 cells west of entry.
-///
-/// Plus a 40×0.1×40 grey ground slab and a `DirectionalLight`.
-/// All entities carry `TestSceneMarker` for one-PR cleanup in Feature #8.
-///
-/// TODO(Feature #8): delete this entire function — replaced by real wall geometry.
-fn spawn_test_scene(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Entry point: grid (1, 1) → world (2.0, 0.0, 2.0), facing North (-Z).
-    // "In front" = North = decreasing world Z from entry.
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-
-    // Red cube — directly north of entry, two cells ahead along initial view.
-    commands.spawn((
-        Mesh3d(cube_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.8, 0.1, 0.1),
-            ..default()
-        })),
-        Transform::from_xyz(2.0, 0.5, 2.0 - CELL_SIZE * 2.0),
-        TestSceneMarker,
-    ));
-
-    // Blue cube — east of entry.
-    commands.spawn((
-        Mesh3d(cube_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.1, 0.1, 0.8),
-            ..default()
-        })),
-        Transform::from_xyz(2.0 + CELL_SIZE * 2.0, 0.5, 2.0),
-        TestSceneMarker,
-    ));
-
-    // Green cube — west of entry.
-    commands.spawn((
-        Mesh3d(cube_mesh),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.1, 0.7, 0.1),
-            ..default()
-        })),
-        Transform::from_xyz(2.0 - CELL_SIZE * 2.0, 0.5, 2.0),
-        TestSceneMarker,
-    ));
-
-    // Ground slab: 40×0.1×40, centered at world origin, y=-0.05 so the top
-    // face is at y=0 (flush with the player's feet).
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(40.0, 0.1, 40.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.3, 0.3),
-            ..default()
-        })),
-        Transform::from_xyz(0.0, -0.05, 0.0),
-        TestSceneMarker,
-    ));
-
-    // Directional light — 45° down-and-diagonal for differential corner shading.
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 3000.0,
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::new(1.0, -1.0, 1.0), Vec3::Y),
-        TestSceneMarker,
-    ));
-}
-
-/// `OnExit(GameState::Dungeon)` — despawn all `PlayerParty` entities
-/// (recursive — child cameras are cleaned up automatically) and all
-/// `TestSceneMarker` entities.
+/// `OnExit(GameState::Dungeon)` — despawn all `PlayerParty` entities (recursive —
+/// child `Camera3d` + torch `PointLight` are cleaned up automatically) and all
+/// `DungeonGeometry` entities (floor + ceiling tiles, wall plates). Also restores
+/// `GlobalAmbientLight` to its `LightPlugin` default so other states (Town, Combat,
+/// etc.) start with a clean ambient setting. Future states own their own ambient
+/// override on entry.
 fn despawn_dungeon_entities(
     mut commands: Commands,
     parties: Query<Entity, With<PlayerParty>>,
-    test_scene: Query<Entity, With<TestSceneMarker>>,
+    dungeon_geometry: Query<Entity, With<DungeonGeometry>>,
 ) {
     for e in &parties {
         commands.entity(e).despawn();
     }
-    for e in &test_scene {
+    for e in &dungeon_geometry {
         commands.entity(e).despawn();
     }
-    info!("Despawned PlayerParty + test scene entities on OnExit(Dungeon)");
+    // Restore default ambient light (white, brightness 80.0). Other states will
+    // override again on their own OnEnter (#18 Town, future states).
+    commands.insert_resource(GlobalAmbientLight::default());
+    info!("Despawned PlayerParty + dungeon geometry on OnExit(Dungeon); ambient restored");
+}
+
+/// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell and wall
+/// plates per renderable edge. Also sets `GlobalAmbientLight` to a near-black
+/// dungeon override for Wizardry-style torchlight atmosphere; the player's
+/// `PointLight` (child of `DungeonCamera`) is the primary illumination source.
+///
+/// Asset-tolerant: warns and returns silently if `DungeonAssets` or the floor handle
+/// is not yet loaded (mirrors `spawn_party_and_camera`).
+///
+/// ## Iteration rule (per-edge deduplication)
+///
+/// For each cell, render `north` and `west` walls; render `south` ONLY at the bottom
+/// edge (`y == height - 1`), `east` ONLY at the right edge (`x == width - 1`). This
+/// guarantees each shared interior wall is rendered exactly once (avoids z-fighting and
+/// double geometry). `Open | OneWay` walls skip geometry via `wall_material` returning
+/// `None`.
+fn spawn_dungeon_geometry(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    dungeon_assets: Option<Res<DungeonAssets>>,
+    floors: Res<Assets<DungeonFloor>>,
+) {
+    // Asset-tolerant: same pattern as spawn_party_and_camera.
+    let Some(assets) = dungeon_assets else {
+        warn!("DungeonAssets resource not present at OnEnter(Dungeon); geometry spawn deferred");
+        return;
+    };
+    let Some(floor) = floors.get(&assets.floor_01) else {
+        warn!("DungeonFloor not yet loaded; geometry spawn deferred");
+        return;
+    };
+
+    // Cached mesh handles (one per shape, shared across all cells for draw-call batching).
+    let floor_mesh = meshes.add(Cuboid::new(CELL_SIZE, FLOOR_THICKNESS, CELL_SIZE));
+    let ceiling_mesh = meshes.add(Cuboid::new(CELL_SIZE, FLOOR_THICKNESS, CELL_SIZE));
+    // wall_mesh_ns: extends along world X (north/south walls). Thin along Z.
+    let wall_mesh_ns = meshes.add(Cuboid::new(CELL_SIZE, CELL_HEIGHT, WALL_THICKNESS));
+    // wall_mesh_ew: extends along world Z (east/west walls). Thin along X.
+    let wall_mesh_ew = meshes.add(Cuboid::new(WALL_THICKNESS, CELL_HEIGHT, CELL_SIZE));
+
+    // Cached material handles (one per role).
+    let floor_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.30, 0.28, 0.25), // warm dark stone
+        ..default()
+    });
+    let ceiling_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.20, 0.22), // cool dark stone
+        ..default()
+    });
+    let wall_solid_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.50, 0.50, 0.55), // cool grey — Solid + SecretWall + Illusory
+        ..default()
+    });
+    let wall_door_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.45, 0.30, 0.15), // brown — Door
+        ..default()
+    });
+    let wall_locked_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.20, 0.15), // dark red — LockedDoor (visual warning)
+        ..default()
+    });
+
+    for y in 0..floor.height {
+        for x in 0..floor.width {
+            let world_x = x as f32 * CELL_SIZE;
+            let world_z = y as f32 * CELL_SIZE;
+
+            // Floor tile: top face flush with world_y = 0.0; cuboid center at -FLOOR_THICKNESS/2.
+            commands.spawn((
+                Mesh3d(floor_mesh.clone()),
+                MeshMaterial3d(floor_mat.clone()),
+                Transform::from_xyz(world_x, -FLOOR_THICKNESS / 2.0, world_z),
+                DungeonGeometry,
+            ));
+
+            // Ceiling tile: bottom face flush with world_y = CELL_HEIGHT; cuboid center at
+            // CELL_HEIGHT + FLOOR_THICKNESS/2.
+            commands.spawn((
+                Mesh3d(ceiling_mesh.clone()),
+                MeshMaterial3d(ceiling_mat.clone()),
+                Transform::from_xyz(world_x, CELL_HEIGHT + FLOOR_THICKNESS / 2.0, world_z),
+                DungeonGeometry,
+            ));
+
+            let walls = &floor.walls[y as usize][x as usize];
+
+            // North wall: always rendered (every cell owns its north face).
+            if let Some(mat) = wall_material(
+                walls.north,
+                &wall_solid_mat,
+                &wall_door_mat,
+                &wall_locked_mat,
+            ) {
+                commands.spawn((
+                    Mesh3d(wall_mesh_ns.clone()),
+                    MeshMaterial3d(mat),
+                    wall_transform(x, y, Direction::North),
+                    DungeonGeometry,
+                ));
+            }
+
+            // West wall: always rendered.
+            if let Some(mat) = wall_material(
+                walls.west,
+                &wall_solid_mat,
+                &wall_door_mat,
+                &wall_locked_mat,
+            ) {
+                commands.spawn((
+                    Mesh3d(wall_mesh_ew.clone()),
+                    MeshMaterial3d(mat),
+                    wall_transform(x, y, Direction::West),
+                    DungeonGeometry,
+                ));
+            }
+
+            // South wall: only at the bottom edge.
+            if y == floor.height - 1
+                && let Some(mat) = wall_material(
+                    walls.south,
+                    &wall_solid_mat,
+                    &wall_door_mat,
+                    &wall_locked_mat,
+                )
+            {
+                commands.spawn((
+                    Mesh3d(wall_mesh_ns.clone()),
+                    MeshMaterial3d(mat),
+                    wall_transform(x, y, Direction::South),
+                    DungeonGeometry,
+                ));
+            }
+
+            // East wall: only at the right edge.
+            if x == floor.width - 1
+                && let Some(mat) = wall_material(
+                    walls.east,
+                    &wall_solid_mat,
+                    &wall_door_mat,
+                    &wall_locked_mat,
+                )
+            {
+                commands.spawn((
+                    Mesh3d(wall_mesh_ew.clone()),
+                    MeshMaterial3d(mat),
+                    wall_transform(x, y, Direction::East),
+                    DungeonGeometry,
+                ));
+            }
+        }
+    }
+
+    // Wizardry-style torchlight: set scene-wide ambient to near-black (1.0 lux ≈
+    // moonlight). The player's PointLight (child of DungeonCamera, intensity 4000)
+    // dominates near the player and falls off into darkness at corridor distance.
+    // Restored to default on OnExit (see despawn_dungeon_entities).
+    commands.insert_resource(GlobalAmbientLight {
+        color: Color::WHITE,
+        brightness: 1.0,
+        ..default()
+    });
+
+    info!(
+        "Spawned dungeon geometry for floor '{}' ({}×{})",
+        floor.name, floor.width, floor.height
+    );
 }
 
 /// `Update` (gated on `GameState::Dungeon && DungeonSubState::Exploring`) —
@@ -510,6 +694,78 @@ fn animate_movement(
 }
 
 // ---------------------------------------------------------------------------
+// Debug grid HUD (dev-only)
+// ---------------------------------------------------------------------------
+
+/// Marker on the dev-only grid-position text overlay. Has its own marker
+/// (NOT `DungeonGeometry`) so entity-count tests on real geometry are
+/// unaffected; cleanup is via `despawn_debug_grid_hud` on OnExit.
+#[cfg(feature = "dev")]
+#[derive(Component)]
+struct DebugGridHud;
+
+/// `OnEnter(GameState::Dungeon)` (dev-only) — spawn a `Camera2d` UI overlay
+/// camera (rendered on top of the 3D scene) and a top-left corner `Text`
+/// overlay showing the player's current grid coordinates and facing.
+/// Updated every frame by `update_debug_grid_hud`.
+///
+/// The Camera2d is required because `bevy_ui` text rendering needs a 2D
+/// camera target. `Order: 1` puts it above the dungeon's `Camera3d` (default
+/// order 0). `ClearColorConfig::None` keeps the 3D scene visible underneath.
+#[cfg(feature = "dev")]
+fn spawn_debug_grid_hud(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        DebugGridHud,
+    ));
+
+    commands.spawn((
+        Text::new("Position: -- | Facing: --"),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.95, 0.95, 0.6)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+        DebugGridHud,
+    ));
+}
+
+/// `Update` (dev-only, gated on `GameState::Dungeon`) — refresh the HUD
+/// text from the current `PlayerParty`'s `GridPosition` + `Facing`.
+#[cfg(feature = "dev")]
+fn update_debug_grid_hud(
+    party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+    mut hud: Query<&mut Text, With<DebugGridHud>>,
+) {
+    let Ok((pos, facing)) = party.single() else {
+        return;
+    };
+    let Ok(mut text) = hud.single_mut() else {
+        return;
+    };
+    text.0 = format!("Position: ({}, {}) | Facing: {:?}", pos.x, pos.y, facing.0);
+}
+
+/// `OnExit(GameState::Dungeon)` (dev-only) — despawn the HUD overlay.
+#[cfg(feature = "dev")]
+fn despawn_debug_grid_hud(mut commands: Commands, hud: Query<Entity, With<DebugGridHud>>) {
+    for entity in &hud {
+        commands.entity(entity).despawn();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -586,6 +842,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wall_transform_north_on_cell_3_4() {
+        // Cell (3, 4): center world (6.0, 0.0, 8.0). North wall at z = 8.0 - 1.0 = 7.0.
+        let t = wall_transform(3, 4, Direction::North);
+        assert!(t.translation.abs_diff_eq(Vec3::new(6.0, 1.5, 7.0), 1e-6));
+        assert!(t.rotation.abs_diff_eq(Quat::IDENTITY, 1e-6));
+    }
+
+    #[test]
+    fn wall_transform_south_on_cell_3_4() {
+        let t = wall_transform(3, 4, Direction::South);
+        assert!(t.translation.abs_diff_eq(Vec3::new(6.0, 1.5, 9.0), 1e-6));
+    }
+
+    #[test]
+    fn wall_transform_east_on_cell_3_4() {
+        let t = wall_transform(3, 4, Direction::East);
+        assert!(t.translation.abs_diff_eq(Vec3::new(7.0, 1.5, 8.0), 1e-6));
+    }
+
+    #[test]
+    fn wall_transform_west_on_cell_3_4() {
+        let t = wall_transform(3, 4, Direction::West);
+        assert!(t.translation.abs_diff_eq(Vec3::new(5.0, 1.5, 8.0), 1e-6));
+    }
+
+    #[test]
+    fn wall_transform_corner_cell_origin() {
+        // Cell (0, 0): negative coords are valid (wall plate is north of the grid origin).
+        let t_north = wall_transform(0, 0, Direction::North);
+        assert!(
+            t_north
+                .translation
+                .abs_diff_eq(Vec3::new(0.0, 1.5, -1.0), 1e-6)
+        );
+        let t_west = wall_transform(0, 0, Direction::West);
+        assert!(
+            t_west
+                .translation
+                .abs_diff_eq(Vec3::new(-1.0, 1.5, 0.0), 1e-6)
+        );
+    }
+
+    #[test]
+    fn wall_material_returns_none_for_passable() {
+        let solid: Handle<StandardMaterial> = Handle::default();
+        let door: Handle<StandardMaterial> = Handle::default();
+        let locked: Handle<StandardMaterial> = Handle::default();
+        assert!(wall_material(WallType::Open, &solid, &door, &locked).is_none());
+        assert!(wall_material(WallType::OneWay, &solid, &door, &locked).is_none());
+    }
+
+    #[test]
+    fn wall_material_returns_some_for_blocking() {
+        let solid: Handle<StandardMaterial> = Handle::default();
+        let door: Handle<StandardMaterial> = Handle::default();
+        let locked: Handle<StandardMaterial> = Handle::default();
+        // Solid, SecretWall, Illusory all share the solid handle.
+        assert!(wall_material(WallType::Solid, &solid, &door, &locked).is_some());
+        assert!(wall_material(WallType::SecretWall, &solid, &door, &locked).is_some());
+        assert!(wall_material(WallType::Illusory, &solid, &door, &locked).is_some());
+        // Door + LockedDoor have their own handles.
+        assert!(wall_material(WallType::Door, &solid, &door, &locked).is_some());
+        assert!(wall_material(WallType::LockedDoor, &solid, &door, &locked).is_some());
+    }
+
     // -----------------------------------------------------------------------
     // Test app helpers
     // -----------------------------------------------------------------------
@@ -594,7 +916,7 @@ mod tests {
     /// Duplicates the pattern from src/plugins/input/mod.rs and
     /// src/plugins/audio/mod.rs tests.
     ///
-    /// `spawn_test_scene` requires `Assets<Mesh>` and `Assets<StandardMaterial>`.
+    /// `spawn_dungeon_geometry` requires `Assets<Mesh>` and `Assets<StandardMaterial>`.
     /// These are normally registered by `MeshPlugin` / `PbrPlugin` (both pulled
     /// in via `DefaultPlugins` at runtime). In tests we init them explicitly so
     /// the minimal app can run `OnEnter(GameState::Dungeon)` without panicking.
@@ -670,7 +992,7 @@ mod tests {
             .resource_mut::<NextState<GameState>>()
             .set(GameState::Dungeon);
         app.update(); // StateTransition schedule realises the new state
-        app.update(); // OnEnter(Dungeon) systems run; party + test scene spawned
+        app.update(); // OnEnter(Dungeon) systems run; party + geometry spawned
     }
 
     // -----------------------------------------------------------------------
@@ -992,6 +1314,123 @@ mod tests {
         assert!(
             !has_anim,
             "MovementAnimation should be removed after tween completes"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Geometry tests (Feature #8)
+    // -----------------------------------------------------------------------
+
+    /// Build a `w × h` floor with EVERY wall set to `Solid` on every cell.
+    /// Counterpart to `make_open_floor`. Used for the maximum-renderable-walls
+    /// regression test.
+    fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
+        use crate::data::dungeon::{CellFeatures, WallMask};
+        let solid_mask = WallMask {
+            north: WallType::Solid,
+            south: WallType::Solid,
+            east: WallType::Solid,
+            west: WallType::Solid,
+        };
+        DungeonFloor {
+            name: "test_walled".into(),
+            width: w,
+            height: h,
+            floor_number: 1,
+            walls: vec![vec![solid_mask; w as usize]; h as usize],
+            features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
+            entry_point: (1, 1, Direction::North),
+            encounter_table: "test_table".into(),
+        }
+    }
+
+    /// Open 3×3 floor: every wall is `Open` (no geometry rendered for any wall).
+    /// Expected: 9 floor + 9 ceiling + 0 walls = 18 entities.
+    /// (No DirectionalLight — torchlight is a child of DungeonCamera, not DungeonGeometry.)
+    #[test]
+    fn spawn_dungeon_geometry_open_3x3_yields_18_entities() {
+        let mut app = make_test_app();
+        insert_test_floor(&mut app, make_open_floor(3, 3));
+        advance_into_dungeon(&mut app);
+
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<DungeonGeometry>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            count, 18,
+            "Open 3×3 floor: 9 floor tiles + 9 ceiling tiles + 0 walls = 18"
+        );
+    }
+
+    /// Fully-walled 3×3 floor: every cell has all 4 walls Solid.
+    ///
+    /// Per the canonical iteration rule:
+    ///   - 9 floor tiles + 9 ceiling tiles = 18
+    ///   - North walls: 9 (one per cell)
+    ///   - West walls:  9 (one per cell)
+    ///   - South walls: 3 (bottom row only, y==2)
+    ///   - East walls:  3 (right column only, x==2)
+    ///   - Total walls: 9 + 9 + 3 + 3 = 24
+    ///
+    /// Expected: 18 + 24 = 42 entities.
+    #[test]
+    fn spawn_dungeon_geometry_walled_3x3_yields_42_entities() {
+        let mut app = make_test_app();
+        insert_test_floor(&mut app, make_walled_floor(3, 3));
+        advance_into_dungeon(&mut app);
+
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<DungeonGeometry>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            count, 42,
+            "Walled 3×3 floor: 18 floor/ceiling + 24 walls = 42 (see test docstring for math)"
+        );
+    }
+
+    /// After OnExit(Dungeon), all DungeonGeometry entities are despawned and
+    /// GlobalAmbientLight is restored to its default.
+    #[test]
+    fn on_exit_dungeon_despawns_all_dungeon_geometry() {
+        let mut app = make_test_app();
+        insert_test_floor(&mut app, make_walled_floor(3, 3));
+        advance_into_dungeon(&mut app);
+
+        // Sanity: geometry is present.
+        let pre = app
+            .world_mut()
+            .query_filtered::<Entity, With<DungeonGeometry>>()
+            .iter(app.world())
+            .count();
+        assert!(pre > 0, "Geometry should be present in Dungeon");
+
+        // Transition to TitleScreen — triggers OnExit(Dungeon).
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::TitleScreen);
+        app.update(); // state transition realised
+        app.update(); // OnExit(Dungeon) systems run
+
+        let post = app
+            .world_mut()
+            .query_filtered::<Entity, With<DungeonGeometry>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            post, 0,
+            "All DungeonGeometry entities must be despawned on OnExit(Dungeon)"
+        );
+
+        // GlobalAmbientLight should be restored to LightPlugin default.
+        let ambient = app.world().resource::<GlobalAmbientLight>();
+        let default_ambient = GlobalAmbientLight::default();
+        assert_eq!(
+            ambient.brightness, default_ambient.brightness,
+            "Ambient brightness should restore to default"
         );
     }
 }

@@ -1,6 +1,7 @@
 # Pipeline State
 
-**Task:** Drive the full pipeline (research → plan) for Feature #7: Grid Movement & First-Person Camera from the dungeon crawler roadmap. This is the FIRST multi-system integration feature — reads `ActionState<DungeonAction>` (#5), `DungeonFloor::can_move` (#4), writes `MessageWriter<SfxRequest>` (#6), defines new `Message<MovedEvent>` for downstream subscribers (#13/#16/#22), owns `GridPosition` + `Facing` + `PlayerParty` components. Spawns `Camera3d` and a placeholder test scene (cubes + lights) so movement is *visually verifiable* before Feature #8 (real 3D dungeon) lands. PAUSE at plan-approval; parent dispatches implementer manually because `SendMessage` does not actually resume returned agents (confirmed during Features #3, #4, #5, and #6).
+**Task:** Drive the full pipeline (research → plan) for Feature #8: 3D Dungeon Renderer (Option B) from the dungeon crawler roadmap. Replace the test scene from #7 (`TestSceneMarker` cubes + ground slab + DirectionalLight) with real 3D geometry generated from `DungeonFloor` data: floor + ceiling tiles, walls per `WallMask`, simple lighting, placeholder solid-color materials. Also fix #7's LOW finding (`src/data/dungeon.rs:18` stale doc-comment). PAUSE at plan-approval; parent dispatches implementer manually because `SendMessage` does not actually resume returned agents (confirmed across Features #3, #4, #5, #6, #7).
+
 **Status:** completed
 **Last Completed Step:** 5
 
@@ -8,100 +9,122 @@
 
 | Step | Description | Artifact                                 |
 | ---- | ----------- | ---------------------------------------- |
-| 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260503-120000-feature-7-grid-movement-first-person-camera.md |
-| 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260503-130000-feature-7-grid-movement-first-person-camera.md |
-| 3    | Implement   | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260503-195500-feature-7-grid-movement-first-person-camera.md |
-| 4    | Ship        | https://github.com/codeinaire/druum-dungeon-crawler/pull/7 (branch `7-grid-movement-first-person-camera`, commit `a9a723e`) |
-| 5    | Code Review | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260503-210000-feature-7-grid-movement-first-person-camera.md (verdict: APPROVE, 1 LOW deferable to #8) |
+| 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260503-220000-feature-8-3d-dungeon-renderer.md |
+| 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260503-223000-feature-8-3d-dungeon-renderer.md |
+| 3    | Implement   | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260504-023000-feature-8-3d-dungeon-renderer.md |
+| 4    | Ship        | https://github.com/codeinaire/druum-dungeon-crawler/pull/8 (branch `8-3d-dungeon-renderer` stacked on `7-grid-movement-first-person-camera`, commit `adaeb20`) |
+| 5    | Code Review | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260503-000000-feature-8-3d-dungeon-renderer.md (verdict: APPROVE, 1 LOW) |
 
 ## Implementation Notes (Step 3)
 
-User approved the plan as-is on 2026-05-03 (no overrides). Implementer completed the full plan with one notable deviation:
+User approved the plan with one explicit override on 2026-05-04: lighting style switched from Etrian-Odyssey scene-wide to **classic Wizardry torchlight** (player-attached PointLight, dark perimeter, oppressive atmosphere). Implementer applied the override:
+- No DirectionalLight spawned
+- `GlobalAmbientLight { brightness: 50.0 }` (very dim)
+- `PointLight` (warm yellow-orange, intensity 1500, range 6.0, no shadows) added as grandchild of `PlayerParty` inside `DungeonCamera` via nested `children!` macro — follows the player automatically, despawns recursively on OnExit.
 
-**TestState + TestFloorAssets pattern in `tests/dungeon_movement.rs`** — the plan called for using real `DungeonAssets` loading via `LoadingPlugin`. The implementer hit a hang (likely `LoadingPlugin` waiting on audio assets that aren't in the test harness), worked around it with a private `TestState` enum + `TestFloorAssets` collection that mirrors the prod shape but isolates from `LoadingPlugin`. Documented in `.claude/agent-memory/implementer/feedback_integration_test_avoid_loadingplugin.md`. Reviewer should verify this doesn't compromise test value.
+All other planner defaults retained (per-edge canonical iteration, per-tile Cuboid floor/ceiling slabs, CELL_HEIGHT=3.0, WALL_THICKNESS=0.05, OneWay rendered as Solid on blocking side only, single-file mod.rs, top-level `DungeonGeometry`-tagged entities for cleanup, wall color palette as planned).
 
-**LOC came in at 997 (vs 790 estimate, ~25% over)** — extra is doc comments + 13 inline tests. Within roadmap budget.
+**LOC: +358 net** in `src/plugins/dungeon/mod.rs` (997 → 1355). Only 7% over plan estimate — much tighter than #7's 25% overrun. Plus 159 LOC new integration test file `tests/dungeon_geometry.rs` and 1-character doc fix at `src/data/dungeon.rs:18`.
 
-**Cross-cutting cargo fmt normalization** touched 7 "frozen" files (input, state, audio/{mod,sfx}, data/dungeon, loading, town, combat). All changes are pure whitespace re-flow per rustfmt rules — no semantic changes. Likely fmt was never previously run cleanly on these files.
+**Entity count for floor_01:** 120 `DungeonGeometry`-tagged (36 floor + 36 ceiling + 48 walls). PointLight is child of camera, not tagged DungeonGeometry — counts excluded from the geometry tests.
 
-Verification: all 7 commands passed (cargo build / build --features dev / test / test --features dev / clippy --all-targets -D warnings / clippy --all-targets --features dev -D warnings / fmt --check). 51 lib + 2 integration tests default; 52 + 2 with `--features dev`. **Cargo.toml + Cargo.lock byte-unchanged** — zero new deps confirmed.
+Verification: all 7 commands passed with zero warnings. **61 lib + 3 integration default / 62 lib + 3 integration with --features dev**. **Cargo.toml + Cargo.lock byte-unchanged.**
 
-Manual visual smoke: NOT executed by implementer (deferred to ship/post-merge user verification).
+**Two minor deviations from the plan:**
+1. Clippy `collapsible_if` triggered Rust 2024 let-chain syntax — nested `if guard { if let Some(x) = ... }` collapsed to `if guard && let Some(x) = ...`.
+2. `spawn_party_and_camera` was modified to add the PointLight child (plan said it would stay untouched) — required by the user's torchlight override.
+
+**Manual visual smoke: NOT run by implementer.** Deferred to user verification — the lighting override means they'll specifically want to see the torchlight effect.
 
 ## Research Summary (Step 1)
 
-Research is **HIGH-confidence** with all Bevy 0.18 APIs verified on-disk and integration contracts cited from Druum source.
+Research is **HIGH-confidence** with all Bevy 0.18 mesh/material/lighting APIs verified on-disk in `~/.cargo/registry/src/index.crates.io-*/bevy_*-0.18.1/`. Entity-count math independently re-verified by the planner against `assets/dungeons/floor_01.dungeon.ron`.
 
-### Recommendations on the 6 architectural questions
+### Recommendations on the 7 architectural questions
 
 | # | Question | Recommendation | Confidence |
 |---|----------|----------------|------------|
-| 1 | Movement animation: instant vs tween | **Tween, 0.18s, smoothstep** | HIGH |
-| 2 | Turn animation: instant vs tween | **Tween, 0.15s, smoothstep** (consistent with #1) | HIGH |
-| 3 | Movement queue / input buffering | **None — drop via `Without<MovementAnimation>` query filter** | HIGH |
-| 4 | Test scene scaffolding | **Three colored cubes at known grid coords + ground plane + ambient + directional light** (marker-tagged for #8 deletion) | MEDIUM |
-| 5 | Eye height + FOV | **eye_height = 0.7, FOV = π/4 (Bevy default)** | MEDIUM |
-| 6 | Cell unit scale | **CELL_SIZE = 2.0 world units** (smaller than master research's 4.0 — genre-correct corridor feel) | MEDIUM |
+| 1 | Per-wall entity vs merged mesh | **Per-wall entity. ~121 entities for floor_01 — trivially OK; no mesh-merging crate.** | HIGH |
+| 2 | Walls per cell vs walls per edge | **Per-edge: render north + west of every cell, plus south on bottom row, east on right column.** | HIGH |
+| 3 | Floor + ceiling: combined slab vs per-tile | **Per-tile (one Cuboid each per cell). Bevy auto-batches identical mesh+material into one draw call.** | HIGH |
+| 4 | Cell height (world_y units) | **CELL_HEIGHT = 3.0** (matches master research and `dungeon/mod.rs:47` doc-comment). | HIGH |
+| 5 | Player-attached light vs scene-wide directional | **Scene-wide DirectionalLight + GlobalAmbientLight resource override.** Etrian Odyssey-style. | MEDIUM |
+| 6 | Wall thickness | **WALL_THICKNESS = 0.05** (non-zero to avoid z-fighting; invisible in v1). | MEDIUM |
+| 7 | OneWay walls visual asymmetry | **Render only the side stored as `Solid` (blocking side); passable side gets no geometry. Falls out for free from per-edge iteration.** | MEDIUM |
 
 ### Key Bevy 0.18 verified facts
 
-1. **`Camera3dBundle` does NOT exist in 0.18.** Spawn as a component tuple: `(Camera3d::default(), Transform::from_xyz(...).looking_at(...))`. Same for `PointLight`/`DirectionalLight`/`AmbientLight`.
-2. **`Time::delta_secs()`** — `delta_seconds()` does not exist.
-3. **Animation pattern = component-marker** mirroring Druum's `FadeIn`/`FadeOut` in `src/plugins/audio/bgm.rs:36-67`.
-4. **`MovedEvent` derives `Message`** (NOT `Event`), registered with `app.add_message::<MovedEvent>()`.
-5. **`TimeUpdateStrategy::ManualDuration(Duration)`** — test-friendly mode for deterministic animation timing.
-6. **Manual smoke is executable** for #7 (camera moves, cubes shift on screen).
+1. **`Cuboid::new(x, y, z)` takes FULL lengths, not half-extents.** Verified at `bevy_math-0.18.1/src/primitives/dim3.rs:691-712`.
+2. **`Plane3d` is single-sided** — recommendation is `Cuboid` slabs for floor + ceiling (consistent with #7's ground slab; sidesteps PI rotation pitfalls).
+3. **`AmbientLight` is a per-camera Component in 0.18** (`#[require(Camera)]`). Scene-wide ambient is the **`GlobalAmbientLight` resource**. Master research is wrong on this.
+4. **`Mesh3d(handle)` and `MeshMaterial3d(handle)` are tuple-struct components.**
+5. **`commands.entity(e).despawn()` is recursive** in 0.18 — no separate `despawn_recursive()`.
+6. **`materials.add(Color::srgb(...))` works directly** via `From<Color> for StandardMaterial`.
+7. **All needed primitives in `bevy::prelude::*`** via existing `features = ["3d"]` at `Cargo.toml:11`.
 
-### LOC + dep impact (research)
+### Items the researcher flagged for the planner
 
-- 350-500 production + 100-150 tests = 450-650 total. Deps Δ = 0.
+- Wall color palette is subjective (visual smoke iterates).
+- DirectionalLight position/orientation is subjective.
+- `GlobalAmbientLight` restoration on OnExit policy across future states (#18 Town).
 
 ## Plan Summary (Step 2)
 
-**Plan adopts all HIGH-confidence research recommendations** with full architectural rationale. Plan structure: Goal, Approach (12 architectural decisions), Critical (14 pitfalls), 10 commit-ordered Steps, Security, 6 Open Questions all RESOLVED, Implementation Discoveries (template), Verification (15 items), LOC estimate.
+**Plan adopts all 7 research recommendations** with full architectural rationale and resolves 6 additional micro-decisions surfaced during planning. Plan structure: Goal, Approach (12 architectural decisions), Critical (15 pitfalls), 13 commit-ordered Steps, Security, 13 Open Questions all RESOLVED, Implementation Discoveries (template), Verification (16 items with both automated + manual), conservative-realistic LOC estimate.
 
-### 10 commit-ordered steps
+### 13 commit-ordered steps
 
-1. **Step 1:** Replace empty `src/plugins/dungeon/mod.rs` stub with full module skeleton — constants (`CELL_SIZE=2.0`, `EYE_HEIGHT=0.7`, `MOVE_DURATION_SECS=0.18`, `TURN_DURATION_SECS=0.15`), components (`PlayerParty`, `DungeonCamera`, `GridPosition`, `Facing`, `MovementAnimation`, `TestSceneMarker`), `MovedEvent` Message, plugin skeleton with `add_message`.
-2. **Step 2:** Implement `grid_to_world` and `facing_to_quat` pure helpers + 7 unit tests (no Bevy app).
-3. **Step 3:** Implement `spawn_party_and_camera` (OnEnter) — spawns `PlayerParty` + child `Camera3d` at `floor.entry_point` with `children![...]` macro.
-4. **Step 4:** Implement `spawn_test_scene` (3 colored cubes + ground plane + DirectionalLight, all `TestSceneMarker`-tagged) + `despawn_dungeon_entities` (OnExit).
-5. **Step 5:** Implement `handle_dungeon_input` (with `Without<MovementAnimation>` filter as the input-lock) + `animate_movement` (smoothstep lerp/slerp, snap-on-completion).
-6. **Step 6:** Wire all systems in `DungeonPlugin::build` — OnEnter spawns, OnExit despawn, Update for input + animate. State-gating at SYSTEM level via `run_if(in_state(...))`.
-7. **Step 7:** Add 6 unit/component tests using `MinimalPlugins + InputPlugin` Layer 2 pattern from Feature #5. Test the input → MovedEvent + SfxRequest flow, wall blocks, turn-only no-event, strafe, input-drop-during-animation.
-8. **Step 8:** Add App-level integration test `tests/dungeon_movement.rs` — real `DungeonAssets` loading flow asserts party spawns at `floor_01.entry_point`.
-9. **Step 9:** Manual smoke verification (visible cubes, WASDQE work, walls block, OnExit cleans up) — same precedent as Feature #6's audible smoke.
-10. **Step 10:** Final 7-command verification matrix + Cargo.toml/Cargo.lock byte-diff check (must be ZERO).
+1. Add new constants (`CELL_HEIGHT = 3.0`, `WALL_THICKNESS = 0.05`, `FLOOR_THICKNESS = 0.05`) and `DungeonGeometry` marker component.
+2. Delete `TestSceneMarker`, `spawn_test_scene` function, and the test-scene despawn branch.
+3. Add `wall_transform` pure helper + 5 unit tests (one per direction + corner cell).
+4. Add `wall_material` pure helper + 2 unit tests covering all 7 WallType variants.
+5. Fix `data/dungeon.rs:18` doc-comment (`-grid_y` → `+grid_y` — single-token edit, the only allowed mod to that frozen file).
+6. Stage `spawn_dungeon_geometry` skeleton: signature, asset guards, mesh/material caches.
+7. Implement per-cell iteration loop + DirectionalLight spawn + GlobalAmbientLight resource insert.
+8. Wire `DungeonGeometry` cleanup into `despawn_dungeon_entities` + restore `GlobalAmbientLight::default()` on OnExit.
+9. Add `make_walled_floor` test helper + 3 App-level tests (open 3×3 = 19 entities, walled 3×3 = 43 entities, on-exit despawns all).
+10. Add new `tests/dungeon_geometry.rs` integration test mirroring `tests/dungeon_movement.rs` exactly; load real `floor_01.dungeon.ron`, assert exact entity count of 121.
+11. Manifest byte-diff guard (`git diff Cargo.toml Cargo.lock` must be EMPTY).
+12. Run the full 7-command verification matrix (zero warnings).
+13. Manual visual smoke test (`cargo run --features dev`, F9 to Dungeon, walk floor_01 with WASDQE, verify walls/doors/OneWay asymmetry render correctly).
 
 ### Architectural decisions baked in
 
-- **Single PlayerParty entity with child Camera3d** via `children![...]` macro. Despawn-recursive on OnExit walks children automatically.
-- **Logical-vs-visual separation:** `GridPosition`/`Facing` updated immediately at input-commit time; `MovementAnimation` lerps the `Transform` over 0.18s/0.15s. Downstream consumers (#13/#16/#22) react to logical state on the same frame, not after the tween.
-- **One `MovementAnimation` component** with both translation and rotation fields (~52 bytes). Two constructors: `::translate(...)` and `::rotate(...)`.
-- **World coordinate convention: `world_z = +grid_y * CELL_SIZE`** (overrides the stale `data/dungeon.rs:18` doc-comment without modifying the frozen file). North movement = -Z motion = matches Bevy's default camera-looking-direction → `Quat::IDENTITY` for North.
-- **System ordering:** `handle_dungeon_input.before(animate_movement)`. Both in `Update`. `handle_dungeon_input` gated on `GameState::Dungeon AND DungeonSubState::Exploring`. `animate_movement` gated only on `GameState::Dungeon` (so opening inventory mid-tween still completes the animation).
-- **`MovedEvent` written ONLY for translation moves**, NOT turn moves. Turn-only writes nothing (no `MovedEvent`, no `SfxRequest`). Wall-bumps write nothing.
-- **Test scene = 3 cubes (red north, blue east, green west of entry point) + 40×0.1×40 grey ground slab + DirectionalLight at 3000 illuminance with `Vec3::new(1.0, -1.0, 1.0)` look-at, shadows_enabled=false.** All `TestSceneMarker`-tagged for one-PR cleanup by Feature #8.
-- **Tests use Layer 2 input pattern** (full `InputPlugin` + leafwing `KeyCode::press(world_mut())`). `TimeUpdateStrategy::ManualDuration(50ms)` for animation determinism. `make_open_floor` helper duplicates Feature #4's `make_floor` (since that helper is `#[cfg(test)]`-private to its own module — ~20 LOC of duplication is cheaper than refactoring a frozen file).
+- **Single-file: keep everything in `src/plugins/dungeon/mod.rs`.** No `render.rs` submodule. File grows to ~1200 LOC, comparable to large Bevy plugin files. Mirrors #7's single-file decision.
+- **Per-edge canonical iteration:** render `north + west` of every cell, plus `south` on bottom row, `east` on right column. Each shared interior edge is iterated exactly once. `OneWay` falls out for free: `wall_material` returns `None` for `Open | OneWay`.
+- **Two cached wall meshes** (`wall_mesh_ns` and `wall_mesh_ew`) with native orientations — simpler than rotating a single mesh by `Quat::from_rotation_y(FRAC_PI_2)`.
+- **Top-level entities, no parent-child hierarchy** — adds complexity for no win at this scale. Single `DungeonGeometry` marker on every spawned mesh + light entity.
+- **`GlobalAmbientLight::default()` restored on OnExit** (the LightPlugin default). Convention: every state owns its ambient setting on entry; OnExit resets to default. Town (#18) overrides on its own OnEnter.
+- **Tests reuse the Layer 2 pattern** from #7. New tests need same `Assets<Mesh>` + `Assets<StandardMaterial>` registrations the test app already provides. Integration test mirrors `tests/dungeon_movement.rs` line-for-line, including the `#[cfg(feature = "dev")] init_resource::<ButtonInput<KeyCode>>()` 5th-feature gotcha.
+- **Entity count = 121 for `floor_01`** (planner independently recounted: 14 north + 22 west + 6 south + 6 east = 48 walls + 36 floor + 36 ceiling + 1 light = 121).
 
 ### LOC + dep impact
 
-- **~790 LOC total** (~570 production + ~220 tests). Slightly above research envelope at upper end due to `MovedEvent` infra + integration test overhead.
-- **Cargo.toml + Cargo.lock byte-unchanged** — Δ deps = 0. If `git diff` shows any change, STOP.
+- **~+205 production LOC** + **~+130 test LOC** = **~+335 LOC net**.
+- File `src/plugins/dungeon/mod.rs`: ~997 → ~1175 LOC (Step 2 deletes -75, Steps 1/3/4/6/7/8/9 add +280).
+- New file: `tests/dungeon_geometry.rs` (~+130 LOC).
+- One-character change: `src/data/dungeon.rs:18`.
+- **Cargo.toml + Cargo.lock byte-unchanged** — Δ deps = 0.
+- If implementer comes in 25% over (matching #7), expect ~+410 LOC total. Flagged for **Implementation Discoveries**.
 
-### All 6 secondary research-open questions RESOLVED by planner (NOT escalated as Category C)
+### All 13 plan-level open questions RESOLVED (NOT escalated as Category C)
 
-1. world_z convention: **+grid_y** (researcher's preference, matches Bevy default camera direction).
-2. CELL_SIZE location: **`src/plugins/dungeon/mod.rs`** (one import path for #8).
-3. Render flat ground plane in #7: **YES** — part of test scaffolding.
-4. MovementAnimation: **ONE component** with both translation+rotation fields.
-5. Lighting direction: **`Vec3::new(1.0, -1.0, 1.0)` target with illuminance=3000.0, shadows_enabled=false.**
-6. Q/E turns write footstep SFX: **NO** — defer to #25 polish (no SfxKind::Turn variant; would touch frozen sfx.rs).
+7 from research (above) + 6 surfaced during planning:
 
-### Critical risks the planner surfaced (NEW — not in research)
+8. Wall color palette → cool grey for Solid/SecretWall/Illusory, brown for Door, dark red for LockedDoor; warm dark stone floor, cool dark stone ceiling. Subjective; iterate via Step 13 visual smoke.
+9. DirectionalLight position/orientation → `(0.0, CELL_HEIGHT * 4.0, 0.0)` looking at `(0.5, -1.0, 0.3)`. Tunable via Step 13.
+10. GlobalAmbientLight restoration on OnExit → `commands.insert_resource(GlobalAmbientLight::default())` (LightPlugin default).
+11. Cell-feature visual overrides for v1 → NO; that's Feature #13.
+12. Module split → NO submodule for #8; #9 may extract.
+13. Sequential vs parallel OnEnter system run → parallel; no resource conflict requires explicit ordering.
 
-1. **Test floor stub `DungeonAssets` field mismatch.** Tests must construct stub `DungeonAssets { floor_01, item_db: Handle::default(), enemy_db: Handle::default(), class_table: Handle::default(), spell_table: Handle::default() }` — adding a 6th field in a future feature requires updating every test stub. Maintenance seam, not a blocker.
-2. **System ordering subtlety:** Without explicit `.before(animate_movement)` ordering, on the input-commit frame `animate_movement` might run BEFORE `handle_dungeon_input`, leaving visual position one frame behind logical position. Plan Step 6 makes the ordering explicit.
+### Critical risks the planner surfaced (NEW — beyond research)
+
+1. **`AmbientLight` Component vs `GlobalAmbientLight` Resource confusion** — master research's spawn snippet would not compile in 0.18. Plan §Critical and §Approach #8 spell out the correct API.
+2. **`Cuboid::new` is full-length, not half-extents** — misreading would double-and-overlap all geometry. Plan §Critical highlights this with the `bevy_math` line citation.
+3. **`Plane3d` single-sided trap** — the planner explicitly recommends NOT using `Plane3d`, even though master research's example used it. Use `Cuboid` slabs for floor + ceiling.
+4. **5th-feature `init_resource::<ButtonInput<KeyCode>>()` test gotcha** — needs to be in the new `tests/dungeon_geometry.rs` integration file too. Plan Step 10 makes this explicit, line-for-line copy from `tests/dungeon_movement.rs:75-76`.
+5. **Manual visual smoke is mandatory** — not just nice-to-have. Specific verification: walls render where the data says, no z-fighting, doors visually distinct, OneWay asymmetry verifiable from cells (2,3) ↔ (3,3).
 
 ### Cleanest-possible-ship signal
 

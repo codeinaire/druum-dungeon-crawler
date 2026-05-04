@@ -13,6 +13,9 @@ bevy = { version = "=0.18.1", default-features = false, features = [
     "ktx2",        # Compressed texture container format
     "zstd_rust",   # Pure-Rust zstd for KTX2 (renamed from `zstd` in 0.18; `zstd_c` is the C variant)
     "bevy_text",   # Text rendering (debug overlays, future UI)
+    "default_font", # Bundle a built-in font so `TextFont::default()` renders glyphs.
+                    # Without this, Text spawns silently with a null font handle and
+                    # nothing visible appears (debug HUD bug on PR #8).
     # bevy_winit, bevy_pbr, bevy_asset are likely pulled in transitively via "3d".
     # If first compile errors with "module not found" or "feature not found",
     # add the missing one explicitly here.
