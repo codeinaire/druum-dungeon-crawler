@@ -202,6 +202,14 @@ impl Plugin for DungeonPlugin {
                     animate_movement.run_if(in_state(GameState::Dungeon)),
                 ),
             );
+
+        #[cfg(feature = "dev")]
+        app.add_systems(OnEnter(GameState::Dungeon), spawn_debug_grid_hud)
+            .add_systems(OnExit(GameState::Dungeon), despawn_debug_grid_hud)
+            .add_systems(
+                Update,
+                update_debug_grid_hud.run_if(in_state(GameState::Dungeon)),
+            );
     }
 }
 
@@ -332,9 +340,9 @@ fn spawn_party_and_camera(
             children![(
                 PointLight {
                     color: Color::srgb(1.0, 0.85, 0.55), // warm yellow-orange torch flame
-                    intensity: 1500.0,                   // ~25 W incandescent equivalent
-                    range: 6.0,                          // ~3 cells of light radius
-                    shadows_enabled: false,              // shadows are Feature #9
+                    intensity: 4000.0, // bright torch — overpowers near-black ambient
+                    range: 8.0,        // ~4 cells of light radius
+                    shadows_enabled: false, // shadows are Feature #9
                     ..default()
                 },
                 Transform::from_xyz(0.0, 0.0, 0.0),
@@ -523,13 +531,13 @@ fn spawn_dungeon_geometry(
         }
     }
 
-    // Wizardry-style torchlight: set scene-wide ambient to near-black. The player's
-    // PointLight (child of DungeonCamera) is the primary illumination source so
-    // distant corridors fade to darkness. Restored to default on OnExit (see
-    // despawn_dungeon_entities).
+    // Wizardry-style torchlight: set scene-wide ambient to near-black (1.0 lux ≈
+    // moonlight). The player's PointLight (child of DungeonCamera, intensity 4000)
+    // dominates near the player and falls off into darkness at corridor distance.
+    // Restored to default on OnExit (see despawn_dungeon_entities).
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
-        brightness: 50.0,
+        brightness: 1.0,
         ..default()
     });
 
@@ -681,6 +689,63 @@ fn animate_movement(
             transform.rotation = anim.to_rotation;
             commands.entity(entity).remove::<MovementAnimation>();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Debug grid HUD (dev-only)
+// ---------------------------------------------------------------------------
+
+/// Marker on the dev-only grid-position text overlay. Has its own marker
+/// (NOT `DungeonGeometry`) so entity-count tests on real geometry are
+/// unaffected; cleanup is via `despawn_debug_grid_hud` on OnExit.
+#[cfg(feature = "dev")]
+#[derive(Component)]
+struct DebugGridHud;
+
+/// `OnEnter(GameState::Dungeon)` (dev-only) — spawn a top-left corner
+/// `Text` overlay showing the player's current grid coordinates and facing.
+/// Updated every frame by `update_debug_grid_hud`.
+#[cfg(feature = "dev")]
+fn spawn_debug_grid_hud(mut commands: Commands) {
+    commands.spawn((
+        Text::new("Position: -- | Facing: --"),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.95, 0.95, 0.6)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+        DebugGridHud,
+    ));
+}
+
+/// `Update` (dev-only, gated on `GameState::Dungeon`) — refresh the HUD
+/// text from the current `PlayerParty`'s `GridPosition` + `Facing`.
+#[cfg(feature = "dev")]
+fn update_debug_grid_hud(
+    party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+    mut hud: Query<&mut Text, With<DebugGridHud>>,
+) {
+    let Ok((pos, facing)) = party.single() else {
+        return;
+    };
+    let Ok(mut text) = hud.single_mut() else {
+        return;
+    };
+    text.0 = format!("Position: ({}, {}) | Facing: {:?}", pos.x, pos.y, facing.0);
+}
+
+/// `OnExit(GameState::Dungeon)` (dev-only) — despawn the HUD overlay.
+#[cfg(feature = "dev")]
+fn despawn_debug_grid_hud(mut commands: Commands, hud: Query<Entity, With<DebugGridHud>>) {
+    for entity in &hud {
+        commands.entity(entity).despawn();
     }
 }
 

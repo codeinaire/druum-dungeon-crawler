@@ -10,3 +10,4 @@
 - [MessageWriter<T> needs app.add_message in tests without owning plugin](feedback_message_writer_needs_registration.md) — SfxRequest must be registered even when AudioPlugin is absent from test app
 - [Integration tests — avoid LoadingPlugin, use TestState + TestFloorAssets](feedback_integration_test_avoid_loadingplugin.md) — LoadingPlugin loads .ogg files which hang headless tests; mirror dungeon_floor_loads.rs pattern
 - [OnEnter Commands are deferred — assertions need Update system not OnEnter](feedback_onenter_commands_deferred.md) — Entities spawned via Commands in OnEnter(S) are not visible to another OnEnter(S) system
+- [Rust 2024 let-chains — clippy collapsible_if with nested if-let guards](feedback_let_chain_collapsible_if.md) — Use `if outer && let Some(x) = expr` instead of nested `if outer { if let Some(x) = ... }` in edition="2024"
