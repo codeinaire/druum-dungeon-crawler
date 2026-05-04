@@ -155,4 +155,23 @@
     ],
     entry_point: (1, 1, North),
     encounter_table: "test_table",
+    // Feature #9 — torch sample placements for visual verification.
+    // Coordinates picked from cells visible from the entry point (1,1):
+    //   (1,1) = entry — bright warm torch overhead, hero shadow caster.
+    //   (4,1) = east end of the row — second warm torch, shadow caster.
+    //   (2,4) = south room — blue mage-touched torch (color variant), shadow caster.
+    //   (4,4) = trap room — warm torch WITHOUT shadows (exercises the shadows-false branch).
+    // 3 of 4 cast shadows — within Bevy's stable-sort cap; spec's "4 per visible region".
+    light_positions: [
+        (x: 1, y: 1, color: (1.0, 0.7, 0.3), intensity: 6000.0, range: 10.0, shadows: true),
+        (x: 4, y: 1, color: (1.0, 0.7, 0.3), intensity: 6000.0, range: 10.0, shadows: true),
+        (x: 2, y: 4, color: (0.6, 0.4, 1.0), intensity: 4000.0, range: 8.0, shadows: true),
+        (x: 4, y: 4, color: (1.0, 0.7, 0.3), intensity: 6000.0, range: 10.0, shadows: false),
+    ],
+    // Feature #9 — per-floor atmosphere. Warm dark fog at low density;
+    // ambient stays at #8's near-black so torches dominate.
+    lighting: (
+        fog: (color: (0.10, 0.09, 0.08), density: 0.12),
+        ambient_brightness: 1.0,
+    ),
 )
