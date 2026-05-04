@@ -25,6 +25,7 @@ bevy = { version = "=0.18.1", default-features = false, features = [
 bevy_common_assets = { version = "=0.16.0", features = ["ron"] }
 bevy_asset_loader  = "=0.26.0"
 leafwing-input-manager = { version = "=0.20.0", default-features = false, features = ["keyboard", "mouse"] }
+bevy_egui = { version = "=0.39.1", default-features = false, features = ["render", "default_fonts"] }
 # serde and ron are transitively present via Bevy but must be declared explicitly
 # in Rust 2024 edition to be usable as direct crate references in our source.
 serde = { version = "1", features = ["derive"] }
