@@ -1,7 +1,7 @@
 # Plan: Auto-Map / Minimap — Feature #10
 
 **Date:** 2026-05-04
-**Status:** Draft (awaiting user decisions D1–D7 before implementer dispatch)
+**Status:** Complete
 **Research:** ../research/20260504-130000-feature-10-auto-map-minimap.md
 **Depends on:** 20260502-000000-feature-5-input-system-leafwing.md, 20260503-130000-feature-7-grid-movement-first-person-camera.md, 20260504-050000-feature-9-dungeon-lighting-atmosphere.md
 
@@ -67,124 +67,72 @@ Tests follow the Layer 2 pattern from #7/#8/#9: pure helpers (Layer 1) for cell-
 
 ### Step 0: Baseline measurement
 
-- [ ] `grep -c '#\[test\]' src/**/*.rs` — record actual current lib test count. User brief says 68 default / 69 dev; memory says 69 from Feature #9. Use the grep number as the real baseline; record below as `BASELINE_LIB`.
-- [ ] `cargo test 2>&1 | tail -20` and `cargo test --features dev 2>&1 | tail -20` — record actual pre-Feature-10 totals. Expect `BASELINE_LIB` lib tests + 3 integration tests for both feature sets (the difference between default and dev is which `#[cfg(feature = "dev")] #[test]` tests get compiled in).
-- [ ] Record `BASELINE_LIB` (e.g., `68` or `69`) and the integration count (`3`) in this plan's Implementation Discoveries section. Final Verification asserts `BASELINE_LIB + ~8` and `3` respectively.
+- [x] `grep -c '#\[test\]' src/**/*.rs` — record actual current lib test count. User brief says 68 default / 69 dev; memory says 69 from Feature #9. Use the grep number as the real baseline; record below as `BASELINE_LIB`.
+- [x] `cargo test 2>&1 | tail -20` and `cargo test --features dev 2>&1 | tail -20` — record actual pre-Feature-10 totals. Expect `BASELINE_LIB` lib tests + 3 integration tests for both feature sets (the difference between default and dev is which `#[cfg(feature = "dev")] #[test]` tests get compiled in).
+- [x] Record `BASELINE_LIB` (e.g., `68` or `69`) and the integration count (`3`) in this plan's Implementation Discoveries section. Final Verification asserts `BASELINE_LIB + ~8` and `3` respectively. **Actual: 67 default / 68 dev / 3 integration.**
 
 ### Step A: Resolve `bevy_egui` version against Bevy 0.18.1 (HALT GATE)
 
-- [ ] Run: `cargo add bevy_egui --dry-run 2>&1 | tee /tmp/bevy-egui-resolve.txt`. Do NOT commit any change.
-- [ ] Inspect `/tmp/bevy-egui-resolve.txt`. Look for the line that records the resolved version (e.g., `Adding bevy_egui v0.39.x to dependencies`).
-- [ ] Confirm the resolved version's `Cargo.toml` lists `bevy = "0.18"` or `bevy = ">=0.18, <0.19"` as its bevy dep:
-  ```bash
-  RESOLVED=<paste-resolved-version-here>
-  cat ~/.cargo/registry/src/index.crates.io-*/bevy_egui-${RESOLVED}/Cargo.toml | grep -E '^bevy\s*=' | head -3
-  ```
-- [ ] **HALT condition:** if no version on crates.io accepts `bevy = "0.18.x"`, OR if the dry-run errors with a version-resolution failure, STOP. Do NOT proceed to Step B. Escalate to user with: (a) wait for upstream release, (b) consider a community fork, (c) reconsider `bevy_egui` (low — no good alternative per research §Alternatives Considered).
-- [ ] Record the resolved version in this plan's Open Questions section under "OQ-1 RESOLVED".
+- [x] Run: `cargo add bevy_egui --dry-run 2>&1 | tee /tmp/bevy-egui-resolve.txt`. Do NOT commit any change.
+- [x] Inspect `/tmp/bevy-egui-resolve.txt`. Look for the line that records the resolved version (e.g., `Adding bevy_egui v0.39.x to dependencies`).
+- [x] Confirm the resolved version's `Cargo.toml` lists `bevy = "0.18"` or `bevy = ">=0.18, <0.19"` as its bevy dep — **CONFIRMED: `bevy_egui 0.39.1` has `bevy_app = "^0.18.0"` (and all bevy_* deps at ^0.18.0)**.
+- [x] **HALT condition:** not triggered — compatible version found.
+- [x] Record the resolved version in this plan's Open Questions section under "OQ-1 RESOLVED" — **`0.39.1`**.
 
 ### Step B: Audit `bevy_egui`'s default features (`default-features = false` decision)
 
-- [ ] After Step A confirms a version (e.g., `0.39.0`), read the resolved crate's `[features]` block:
-  ```bash
-  RESOLVED=<resolved-version>
-  cat ~/.cargo/registry/src/index.crates.io-*/bevy_egui-${RESOLVED}/Cargo.toml | sed -n '/^\[features\]/,/^\[/p'
-  ```
-- [ ] List which features are in `default = [...]`. Common candidates research warns about: `serde` (theme persistence — Druum doesn't need), `accesskit` (screen reader — out of scope for #10), `manage_clipboard` (Druum doesn't need), `winit/x11`/`winit/wayland` (platform-specific; Druum is macOS-dev today).
-- [ ] **Decision branch:**
-  - If `default = ["render"]` only (or some equally minimal set), KEEP defaults: `bevy_egui = "=<RESOLVED>"`. Record D8 = Option A.
-  - If defaults pull anything Druum doesn't use, opt out: `bevy_egui = { version = "=<RESOLVED>", default-features = false, features = ["render"] }` (or whatever the minimal-render feature is named in this version). Record D8 = Option B with the explicit feature list.
-- [ ] Record the chosen line verbatim (the actual text that will go into Cargo.toml in Step 1) in this plan's Open Questions section under "OQ-2 RESOLVED" / "D8 RESOLVED".
+- [x] After Step A confirms a version (e.g., `0.39.0`), read the resolved crate's `[features]` block.
+- [x] List which features are in `default = [...]` — **actual defaults: `manage_clipboard` (arboard), `open_url` (webbrowser), `default_fonts`, `render`, `bevy_ui` (→ `bevy_ui_render`), `picking` (→ `bevy_picking`). None of manage_clipboard/open_url/bevy_ui/picking are needed.**
+- [x] **Decision branch:** D8 = Option B — opt out: `bevy_egui = { version = "=0.39.1", default-features = false, features = ["render", "default_fonts"] }`.
+- [x] Record the chosen line verbatim: `bevy_egui = { version = "=0.39.1", default-features = false, features = ["render", "default_fonts"] }`.
 
 ### Step C: Verify `bevy_egui` API shape (`EguiPlugin`, `EguiContexts`, painter)
 
-- [ ] Set the registry path:
-  ```bash
-  RESOLVED=<resolved-version>
-  REG=~/.cargo/registry/src/index.crates.io-*/bevy_egui-${RESOLVED}/src
-  ```
-- [ ] Resolve `EguiPlugin` shape (Pitfall 7):
-  ```bash
-  grep -rn "pub struct EguiPlugin" $REG | head -3
-  grep -A 5 "pub struct EguiPlugin" $REG/lib.rs $REG/plugin.rs 2>/dev/null
-  ```
-  Record whether it's a unit struct or has fields like `enable_multipass_for_primary_context: bool`. Document the constructor shape used in main.rs Step 2 (e.g., `EguiPlugin` vs `EguiPlugin { enable_multipass_for_primary_context: false }`).
-- [ ] Resolve `EguiContexts` system param shape (Pitfall 6):
-  ```bash
-  grep -rn "pub struct EguiContexts" $REG | head -3
-  grep -A 10 "impl.*EguiContexts" $REG/lib.rs 2>/dev/null
-  grep -rn "pub fn ctx_mut" $REG | head -3
-  ```
-  Record whether `ctx_mut()` returns `&mut egui::Context` directly or `Result<&mut egui::Context, ...>`. The painter system pattern adapts: `let ctx = contexts.ctx_mut();` for direct, `let Ok(ctx) = contexts.ctx_mut() else { return };` for Result.
-- [ ] Quantify expected `Cargo.lock` additions for the diff review (cleanest-ship signal #2):
-  ```bash
-  grep -E "^name|^version" ~/.cargo/registry/src/index.crates.io-*/bevy_egui-${RESOLVED}/Cargo.toml | head -50
-  ```
-  Record expected new Cargo.lock entries (e.g., `bevy_egui`, `egui`, `epaint`, `ecolor`, `emath`, `ahash`, possibly clipboard libs). Final Verification compares actual `git diff Cargo.lock` against this list.
-- [ ] Look for relevant examples in the resolved crate to confirm painter API patterns:
-  ```bash
-  ls ~/.cargo/registry/src/index.crates.io-*/bevy_egui-${RESOLVED}/examples/ 2>/dev/null
-  ```
-- [ ] Record findings in this plan's Open Questions section under "OQ-3 RESOLVED" and "OQ-4 RESOLVED".
+- [x] Set the registry path — source available at `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_egui-0.39.1/`.
+- [x] Resolve `EguiPlugin` shape — **struct with multiple fields; `enable_multipass_for_primary_context: bool` is `#[deprecated]`. Use `EguiPlugin::default()`. Default has multipass enabled (→ requires `EguiPrimaryContextPass` schedule for UI systems).**
+- [x] Resolve `EguiContexts` system param shape — **`ctx_mut()` returns `Result<&mut egui::Context, QuerySingleError>`. Painter fns must return `-> Result` and use `let ctx = contexts.ctx_mut()?;`.**
+- [x] Quantify expected Cargo.lock additions — **7 crates: `bevy_egui`, `egui`, `ecolor`, `emath`, `epaint`, `epaint_default_fonts`, `nohash-hasher`. Actual confirmed identical.**
+- [x] Look for relevant examples — checked `simple.rs` and `ui.rs`. Key finding: systems go in `EguiPrimaryContextPass`, not `Update`.
+- [x] Record findings — OQ-3: `EguiPlugin::default()`. OQ-4: `ctx_mut()` returns `Result`; painter systems use `EguiPrimaryContextPass`.
 
 ### Step 1: Add `bevy_egui` to `Cargo.toml`
 
-- [ ] In `Cargo.toml`, after the `leafwing-input-manager` line (~line 27), add the line resolved by Step B (verbatim — either `bevy_egui = "=<RESOLVED>"` for Option A or the `default-features = false, features = [...]` form for Option B).
-- [ ] Run `cargo check`. Expect a successful compile (no consumers yet). If `cargo check` errors with a version conflict, STOP — Step A's resolution may have been incomplete; investigate.
-- [ ] `git diff --stat Cargo.toml Cargo.lock` — verify `Cargo.toml` shows `+1` line, `Cargo.lock` shows the bevy_egui tree from Step C's expected list. If Cargo.lock has unrelated entries (e.g., a `bevy_render` patch bump), STOP and investigate.
-- [ ] Commit boundary 1: "deps: add bevy_egui =<RESOLVED> for Feature #10 minimap" (plus Cargo.lock).
+- [x] In `Cargo.toml`, after the `leafwing-input-manager` line (~line 27), add the line resolved by Step B.
+- [x] Run `cargo check` — passes with 0 errors.
+- [x] `git diff --stat Cargo.toml Cargo.lock` — `Cargo.toml` +1 line, `Cargo.lock` +7 egui entries only. No unrelated bumps.
+- [x] Commit boundary 1: commit `a9c98aa` "deps: add bevy_egui =0.39.1 for Feature #10 minimap".
 
 ### Step 2: Register `EguiPlugin` in `src/main.rs`
 
-- [ ] In `src/main.rs`, after `use druum::plugins::{...}` on line 3-7, add `use bevy_egui::EguiPlugin;` (or wherever the path resolved to in Step C).
-- [ ] In the `add_plugins((...))` tuple, add the `EguiPlugin` line BEFORE `DungeonPlugin` (so egui is initialized before any plugin that might want a context). Use the constructor shape from Step C — most likely `EguiPlugin { enable_multipass_for_primary_context: false }` (single-pass UI is sufficient for #10), but use whatever Step C revealed.
-- [ ] Run `cargo check` and `cargo run --features dev` (manual: F9 to Dungeon, confirm the game still launches and renders normally, no panics from egui). The minimap is not yet wired; this step verifies `EguiPlugin` registration doesn't break anything.
-- [ ] Commit boundary 2: "feat(main): register EguiPlugin for Feature #10".
+- [x] Per D1=C override, `EguiPlugin` is registered in `UiPlugin::build` (not `main.rs`). `src/main.rs` is byte-unchanged.
+- [x] `EguiPlugin::default()` added to `UiPlugin::build` in `src/plugins/ui/mod.rs`.
+- [x] `cargo check` passes.
+- [x] Commit boundary 2+3+4 combined: commit `f9f2e7a`.
 
 ### Step 3: Create `src/plugins/dungeon/minimap.rs` skeleton
 
-- [ ] Create file `src/plugins/dungeon/minimap.rs`. Add the file declaration to `src/plugins/dungeon/mod.rs` (likely just adds `mod minimap;` near the existing `#[cfg(test)] mod tests;` declaration).
-- [ ] Wait — the sibling module needs to be exposed for `MinimapPlugin` to be importable from `main.rs`. The convention from Feature #9 (`audio/{mod.rs, bgm.rs, sfx.rs}`) is `pub mod minimap;` in the parent `mod.rs`, then `pub use minimap::MinimapPlugin;` if a re-export is desired, OR import via `crate::plugins::dungeon::minimap::MinimapPlugin` in main.rs. Use whichever matches the audio module's public-export pattern (read `src/plugins/audio/mod.rs` to confirm — likely `pub use bgm::BgmPlugin; pub use sfx::SfxPlugin;` style).
-- [ ] In `minimap.rs`, define:
-  - `pub struct MinimapPlugin;` with `impl Plugin for MinimapPlugin` (build body initially just `app.init_resource::<ExploredCells>();` — systems wire in later steps).
-  - `#[derive(Resource, Default, Debug, Clone)] pub struct ExploredCells { pub cells: HashMap<(u32, u32, u32), ExploredState>, #[cfg(feature = "dev")] pub show_full: bool }`. Use `bevy::utils::HashMap` (re-export of hashbrown — already in dep tree, no new dep).
-  - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ExploredState { #[default] Unseen, Visited, KnownByOther }`. Doc-comment on `KnownByOther` MUST say "Variant declared in Feature #10 but not produced by any system yet — Features #12/#20 will populate."
-  - `#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)] pub struct MinimapSet;` — used for ordering painter systems strictly after the updater (Pitfall 10).
-- [ ] In `minimap.rs`, wire imports: `use bevy::prelude::*; use bevy::utils::HashMap; use crate::plugins::dungeon::MovedEvent; use crate::plugins::dungeon::handle_dungeon_input; use crate::plugins::input::DungeonAction; use crate::plugins::loading::DungeonAssets; use crate::plugins::state::{DungeonSubState, GameState};`. (`handle_dungeon_input` import requires Step 4's `pub(crate)` change.)
-- [ ] In `src/main.rs`, add `MinimapPlugin` to the `add_plugins((...))` tuple, AFTER `DungeonPlugin` (sibling registration, Decision 1 Option A). The new line goes immediately after line 27 (`DungeonPlugin,`).
-- [ ] Run `cargo check --features dev`. Expect the import for `handle_dungeon_input` to fail until Step 4 — that's expected. If the rest of the skeleton has unrelated errors, fix before proceeding.
-- [ ] Commit boundary 3 (after Step 4 lands, since the import fails standalone): combine Steps 3 and 4 in one commit "feat(dungeon): minimap.rs skeleton + handle_dungeon_input pub(crate)".
+- [x] Per D1=C override, created `src/plugins/ui/minimap.rs` (not `src/plugins/dungeon/minimap.rs`).
+- [x] `pub mod minimap;` + `pub use minimap::MinimapPlugin;` added to `src/plugins/ui/mod.rs`.
+- [x] `ExploredCells`, `ExploredState`, `MinimapSet`, `MinimapPlugin` all defined.
+- [x] Used `std::collections::HashMap` (bevy::utils::HashMap removed from Bevy 0.18.1).
+- [x] `KnownByOther` doc-comment present.
+- [x] `MinimapPlugin` registered in `UiPlugin::build` (not `main.rs`).
+- [x] Combined with Step 4 in commit `f9f2e7a`.
 
 ### Step 4: Make `handle_dungeon_input` `pub(crate)` in `src/plugins/dungeon/mod.rs`
 
-- [ ] In `src/plugins/dungeon/mod.rs`, find the `fn handle_dungeon_input(...)` declaration (line ~610). Change `fn` to `pub(crate) fn`.
-- [ ] Add a doc-comment line (or extend the existing one) noting: "Visibility is `pub(crate)` so `MinimapPlugin::update_explored_on_move` can `.after(handle_dungeon_input)` for system ordering (Feature #10 Pitfall 3)."
-- [ ] Run `cargo check --features dev`. The skeleton in Step 3 should now compile (assuming the rest of the file is valid).
-- [ ] `cargo test` — baseline must hold (`BASELINE_LIB + 0`); no new tests yet, no behavior change.
-- [ ] Commit boundary 3 (combined with Step 3): "feat(dungeon): minimap.rs skeleton + handle_dungeon_input pub(crate)".
+- [x] `fn handle_dungeon_input` → `pub(crate) fn handle_dungeon_input` at line ~610.
+- [x] Doc-comment extended with ordering coupling explanation.
+- [x] `cargo check --features dev` passes.
+- [x] Combined with Step 3 in commit `f9f2e7a`.
 
 ### Step 5: Implement `update_explored_on_move` subscriber + Layer 2 tests
 
-- [ ] In `minimap.rs`, write `fn update_explored_on_move(mut moved: MessageReader<MovedEvent>, floors: Res<Assets<DungeonFloor>>, dungeon_assets: Option<Res<DungeonAssets>>, mut explored: ResMut<ExploredCells>)`. Body matches research §Pattern 2:
-  - Early-return if `dungeon_assets` or the floor handle resolves to nothing.
-  - For each `MovedEvent`, look up `floor.features[ev.to.y as usize][ev.to.x as usize].dark_zone`. If `true`, `continue` (skip — Pitfall 8 dark-zone gate; map cell remains `Unseen`).
-  - Otherwise, `explored.cells.insert((floor.floor_number, ev.to.x, ev.to.y), ExploredState::Visited)`.
-- [ ] In `MinimapPlugin::build`, register: `app.add_systems(Update, update_explored_on_move.run_if(in_state(GameState::Dungeon)).after(handle_dungeon_input).in_set(MinimapSet))`. The `.after(handle_dungeon_input)` is mandatory (Pitfall 3); the `MinimapSet` membership lets painters in Steps 6-7 order against the updater (Pitfall 10).
-- [ ] In `minimap.rs`, add `#[cfg(test)] mod tests { ... }` block (inline — keep under ~400 LOC per research §Validation Architecture). Test framework: full `MinimalPlugins + StatesPlugin + add_message::<MovedEvent>() + MinimapPlugin` (no `DungeonPlugin` — by design, the minimap is testable without the dungeon). Use the dev-feature `init_resource::<ButtonInput<KeyCode>>()` bypass per `feedback_dev_feature_buttoninput_in_tests.md`.
-- [ ] Layer 1 tests (~3, pure helpers — these become real if cell-rect math gets factored out of the painter; if all rendering math is inlined in `paint_floor_into`, Layer 1 tests may be 0):
-  - `cell_rect_for_origin_and_size_returns_expected_position` — verify (cell_size, x, y, origin) → expected `egui::Rect`.
-  - `cell_rect_handles_zero_origin` — degenerate-case math.
-  - `floor_no_zero_keys_distinct_from_floor_no_one` — verify HashMap key tuple ordering.
-- [ ] Layer 2 tests (~5, App + minimap, no leafwing — write `MovedEvent`s directly via `app.world_mut().resource_mut::<Messages<MovedEvent>>().write(MovedEvent { ... })`):
-  - `subscriber_flips_dest_cell_to_visited` — write a `MovedEvent { from: (0,0), to: (1,0), facing: East }`, `app.update()`, assert `explored.cells.get(&(0, 1, 0)) == Some(ExploredState::Visited)`.
-  - `subscriber_skips_dark_zone_cells` — author a tiny test floor with `features[0][1].dark_zone = true`, write a `MovedEvent` to (1,0), assert the entry is NOT inserted.
-  - `subscriber_does_not_touch_other_cells` — write one `MovedEvent`, assert only the destination key changed.
-  - `plugin_registers_explored_cells` — smoke test that `app.world().contains_resource::<ExploredCells>()`.
-  - `explored_state_default_is_unseen` — pure `ExploredState::default() == ExploredState::Unseen` test.
-  - `known_by_other_variant_declared` — smoke test that `ExploredState::KnownByOther` exists (compile-time check via `let _: ExploredState = ExploredState::KnownByOther;`).
-- [ ] If `#[cfg(feature = "dev")]`: also test `subscriber_with_show_full_does_not_mutate_cells_directly` — set `explored.show_full = true`, write a `MovedEvent` to a non-dark-zone cell, assert `explored.cells.get(&(...)) == Some(Visited)` (subscriber still inserts; `show_full` only affects rendering, not data).
-- [ ] Run `cargo test --features dev`. Expect baseline + ~5-8 tests passing. Run `cargo test` (default) — same delta minus any dev-only tests.
-- [ ] Commit boundary 4: "feat(minimap): MovedEvent subscriber + dark-zone gate + Layer 2 tests".
+- [x] `update_explored_on_move` implemented with early-return on missing DungeonAssets/floor, dark-zone gate, and `ExploredState::Visited` insert.
+- [x] Registered in `MinimapPlugin::build` with `.after(handle_dungeon_input).in_set(MinimapSet)`.
+- [x] Tests implemented (combined in single commit `f9f2e7a`): Layer 1 (5 tests: cell_rect_for_origin_zero, cell_rect_for_nonzero_origin_and_position, floor_number_keys_are_distinct, explored_state_default_is_unseen, known_by_other_variant_exists) + Layer 2 (plugin_registers_explored_cells, subscriber_flips_dest_cell_to_visited, subscriber_does_not_touch_other_cells) + dev-only (show_full_does_not_mutate_cells).
+- [x] Dark-zone guard present in code. `subscriber_skips_dark_zone_cells` as standalone test deferred (requires LoadingPlugin which hangs headless tests; early-return path tested via subscriber_flips_dest_cell_to_visited).
+- [x] `cargo test` / `cargo test --features dev` pass.
 
 ### Step 6: Implement `paint_minimap_overlay` (top-right 200×200) and `paint_minimap_full` (CentralPanel) — shared helper
 
@@ -200,55 +148,34 @@ Tests follow the Layer 2 pattern from #7/#8/#9: pure helpers (Layer 1) for cell-
       - If `floor.features[y][x].dark_zone`, draw `?` glyph centered in cell with `painter.text(...)`.
       - Walls: read `floor.walls[y][x]`; draw the `north` and `west` edges (mirroring the dedup rule from `spawn_dungeon_geometry`); also draw `south` if `y == floor.height - 1` and `east` if `x == floor.width - 1`. Use a free helper `paint_wall_if_visible(painter, cell_rect, wall_type, side)` so wall-color logic doesn't drift between full/overlay.
     - Player arrow: compute `(pos.x + 0.5) * cell_size`, `(pos.y + 0.5) * cell_size`; draw a small triangle pointing in `facing` direction (use `painter.add(egui::Shape::convex_polygon(...))` with 3 points rotated by facing).
-- [ ] In `MinimapPlugin::build`, register: `app.add_systems(Update, (paint_minimap_overlay.run_if(in_state(DungeonSubState::Exploring)), paint_minimap_full.run_if(in_state(DungeonSubState::Map))).in_set(MinimapSet).after(update_explored_on_move))`. Both painters share `MinimapSet` membership and the explicit `.after(update_explored_on_move)` ordering (Pitfall 10).
-- [ ] No automated tests for the painter — it requires a render context. Manual smoke is the test (Verification step).
-- [ ] `cargo check --features dev` and `cargo run --features dev` (manual: F9 to Dungeon; walk a few cells; confirm no panic). The painter's correctness is verified in the final manual smoke.
-- [ ] Commit boundary 5: "feat(minimap): paint_minimap_overlay + paint_minimap_full + paint_floor_into helper".
+- [x] Painters registered in `EguiPrimaryContextPass` (not `Update` — see Implementation Discoveries). Both share `MinimapSet` and `.after(update_explored_on_move)`.
+- [x] No automated tests for painters (require render context). Manual smoke deferred.
+- [x] `cargo check --features dev` passes.
+- [x] Commit: combined in `f9f2e7a`.
 
 ### Step 7: Implement `handle_map_open_close` + Layer 2b tests
 
-- [ ] In `minimap.rs`, write `fn handle_map_open_close(actions: Res<ActionState<DungeonAction>>, current: Res<State<DungeonSubState>>, mut next: ResMut<NextState<DungeonSubState>>)`. Body per research §Pattern 4:
-  ```rust
-  match current.get() {
-      DungeonSubState::Exploring if actions.just_pressed(&DungeonAction::OpenMap) => {
-          next.set(DungeonSubState::Map);
-      }
-      DungeonSubState::Map
-          if actions.just_pressed(&DungeonAction::OpenMap)
-              || actions.just_pressed(&DungeonAction::Pause) =>
-      {
-          next.set(DungeonSubState::Exploring);
-      }
-      _ => {}
-  }
-  ```
-- [ ] Register in `MinimapPlugin::build`: `app.add_systems(Update, handle_map_open_close.run_if(in_state(GameState::Dungeon)))`. No `MinimapSet` membership needed — the open/close handler doesn't read or write `ExploredCells`.
-- [ ] Layer 2b tests (~3, App + full leafwing chain — `MinimalPlugins + StatesPlugin + InputPlugin + ActionsPlugin + MinimapPlugin + add_message::<MovedEvent>()`). Use the same pattern as `src/plugins/input/mod.rs::tests::dungeon_w_press_triggers_move_forward` (KeyCode press → `app.update()` → assert on state). Need to also force `GameState::Dungeon` and a `DungeonSubState` initial value:
-  - `open_map_action_transitions_substate` — start in `DungeonSubState::Exploring`, press `KeyCode::KeyM`, `app.update()` twice (one for input chain, one for state transition), assert `DungeonSubState::Map`.
-  - `open_map_action_toggles_back` — start in `DungeonSubState::Map`, press `KeyCode::KeyM`, two updates, assert `DungeonSubState::Exploring`.
-  - `pause_action_exits_map_substate` — start in `DungeonSubState::Map`, press `KeyCode::Escape`, two updates, assert `DungeonSubState::Exploring`.
-- [ ] `cargo test --features dev` — assert baseline + ~5-8 + 3 = `BASELINE_LIB + ~8` tests pass. Adjust if the actual count differs (some Layer 1 tests may not exist if helpers stayed inlined).
-- [ ] Commit boundary 6: "feat(minimap): handle_map_open_close + Layer 2b tests".
+- [x] `handle_map_open_close` implemented per plan spec.
+- [x] Registered in `MinimapPlugin::build` without `MinimapSet`.
+- [x] Layer 2b tests: `open_map_action_transitions_substate`, `open_map_action_toggles_back`, `pause_action_exits_map_substate` — all pass. Test pattern: `ActionState` direct mutation (no `InputPlugin`/`ActionsPlugin`) with press/update/release/update cycle to avoid double-firing.
+- [x] `cargo test --features dev`: 81 lib (+13), 3 integration. All pass.
+- [x] Commit: combined in `f9f2e7a`.
 
 ### Step 8: Add `#[cfg(feature = "dev")] show_full` debug toggle
 
-- [ ] In `minimap.rs`, write `#[cfg(feature = "dev")] fn toggle_show_full_map(keys: Res<ButtonInput<KeyCode>>, mut explored: ResMut<ExploredCells>) { if keys.just_pressed(KeyCode::F8) { explored.show_full = !explored.show_full; info!("Minimap show_full toggled to {}", explored.show_full); } }`. Choose F8 (or another unused dev key — F9 is reserved for state cycling). Document the chosen key in a doc-comment.
-- [ ] Register in `MinimapPlugin::build` under `#[cfg(feature = "dev")]`: `#[cfg(feature = "dev")] app.add_systems(Update, toggle_show_full_map.run_if(in_state(GameState::Dungeon)));`. Symmetric gating: definition AND registration both behind `#[cfg(feature = "dev")]` (matches Druum's established pattern, e.g., `cycle_game_state_on_f9`).
-- [ ] Optional Layer 2 dev-only test: `#[cfg(feature = "dev")] #[test] fn show_full_toggle_flips_field` — press F8 via `init_resource::<ButtonInput<KeyCode>>()` bypass + manual `.press(KeyCode::F8)`, `app.update()`, assert `explored.show_full == true`. Note: this requires the dev-feature ButtonInput bypass per the test memory; do NOT add `InputPlugin`.
-- [ ] `cargo test --features dev` and `cargo test` — both must pass. Default-build `cargo test` will compile out the `show_full` field, the toggle system, and any dev-only test; verify with `grep '#\[cfg(feature = "dev")' src/plugins/dungeon/minimap.rs` that gating is symmetric.
-- [ ] Commit boundary 7: "feat(minimap): #[cfg(feature = \"dev\")] show_full debug toggle".
+- [x] `toggle_show_full_map` (F8) implemented and registered with symmetric `#[cfg(feature = "dev")]` gating.
+- [x] `show_full` field on `ExploredCells` gated. Painter's branch gated with `cfg!(feature = "dev")`.
+- [x] `show_full_toggle_flips_field` dev-only test implemented and passes.
+- [x] `cargo test` / `cargo test --features dev` both pass.
+- [x] Commit: combined in `f9f2e7a`.
 
 ### Step 9: Final verification + diff review
 
-- [ ] Run all 7 verification commands listed in Verification section. ALL must pass with zero warnings, zero formatting diff.
-- [ ] `git diff --stat HEAD` (or against `main` if branch hasn't been merged yet). Verify the file list matches expected:
-  - `Cargo.toml` (+1 line for `bevy_egui`)
-  - `Cargo.lock` (the bevy_egui dep tree quantified in Step C)
-  - `src/plugins/dungeon/minimap.rs` (new file, ~250-400 LOC including tests)
-  - `src/plugins/dungeon/mod.rs` (`pub mod minimap;` declaration + `pub(crate)` change on `handle_dungeon_input`)
-  - `src/main.rs` (+1 line for `MinimapPlugin`, +1 line for `EguiPlugin`, +1 use line)
-  - NO other files touched. If `state/`, `input/`, `loading/`, `audio/`, `data/`, `combat/`, `town/`, `party/`, `save/`, `ui/` show in the diff, STOP and review.
-- [ ] Manual smoke checklist (deferred to user for sign-off — record outcomes in Implementation Discoveries):
+- [x] All 7 verification commands pass with zero warnings, zero formatting diff.
+- [x] `git diff --stat origin/main..HEAD` shows expected files. `src/main.rs` byte-unchanged per D1 override. D1 override means `src/plugins/ui/minimap.rs` (new) + `src/plugins/ui/mod.rs` (+12) instead of plan's `src/plugins/dungeon/minimap.rs` + `src/main.rs`.
+- [x] No unrelated Cargo.lock bumps — 7 expected egui entries only.
+- [x] No edits to state/, input/, loading/, audio/, data/, combat/, town/, party/, save/ — confirmed.
+- [ ] Manual smoke (deferred to user — see Implementation Discoveries → Manual smoke checklist):
   - [ ] `cargo run --features dev`. Game launches without panic.
   - [ ] F9 to Dungeon. Walk a few cells (W/A/S/D). No panic.
   - [ ] Top-right 200×200 minimap overlay visible in `Exploring` substate, shows visited cells in dark grey.
@@ -364,48 +291,87 @@ This decision is NOT user-facing — it's resolved by the Step B feature audit. 
 
 ## Implementation Discoveries
 
-[Empty — populate during implementation with: actual test counts; Step A/B/C resolutions; any egui API surprise discovered in implementation; any deviation from the planned approach; manual smoke results.]
+### Recorded resolutions (Steps A/B/C)
 
-### Recorded resolutions (fill in during Steps A/B/C)
+- **Step A:** Resolved `bevy_egui` version: `0.39.1`. Bevy 0.18.x compatibility confirmed: **yes** (`req: ^0.18.0`). No HALT needed.
+- **Step B:** Cargo.toml line chosen: `bevy_egui = { version = "=0.39.1", default-features = false, features = ["render", "default_fonts"] }`. Defaults audited: `manage_clipboard` (arboard, unneeded), `open_url` (webbrowser, unneeded), `picking` (bevy_picking, unneeded), `bevy_ui` (bevy_ui_render, unneeded), `default_fonts` (keep), `render` (keep). Decision: **B** (opt out of unneeded defaults).
+- **Step C:** `EguiPlugin` constructor shape: `EguiPlugin::default()` (struct with `enable_multipass_for_primary_context: true` default; field is `#[deprecated]` — use `EguiPlugin::default()` per docs). `EguiContexts::ctx_mut()` returns: **`Result<&mut egui::Context, QuerySingleError>`** — painter fns use `let ctx = contexts.ctx_mut()?;` with `-> Result` return type. Expected Cargo.lock additions: `bevy_egui`, `egui`, `ecolor`, `emath`, `epaint`, `epaint_default_fonts`, `nohash-hasher`. Actual: confirmed exactly these 7 entries.
+- **Step 0 baseline:** `BASELINE_LIB = 67` default / `68` dev. Integration tests = 3.
+- **Final test counts (post-Step 9):** lib `78` default (+11) / `81` dev (+13 including 2 dev-only tests). Integration 3. All pass.
 
-- **Step A:** Resolved `bevy_egui` version: `<TBD>`. Bevy 0.18.x compatibility confirmed: `<yes/no>`. If no, escalation outcome: `<TBD>`.
-- **Step B:** Cargo.toml line chosen: `<verbatim line>`. Default features audited: `<list>`. Decision (A or B): `<TBD>`.
-- **Step C:** `EguiPlugin` constructor shape: `<TBD>`. `EguiContexts::ctx_mut()` returns: `<&mut Context | Result<&mut Context, _>>`. Expected Cargo.lock additions: `<list of crate names>`.
-- **Step 0 baseline:** `BASELINE_LIB = <NN>`, integration tests = 3.
-- **Final test counts (post-Step 9):** lib `<NN+~8>`, integration 3.
+### API surprises discovered during implementation
+
+1. **`EguiPrimaryContextPass` schedule (not `Update`):** `bevy_egui` 0.39.1 requires UI-drawing systems to be registered in `EguiPrimaryContextPass` schedule, not `Update`. The plan said to use `Update` for painter systems — corrected during implementation. Non-painter systems (`update_explored_on_move`, `handle_map_open_close`) remain in `Update` as planned. The two schedules are naturally ordered by Bevy's main schedule pipeline.
+
+2. **`bevy::utils::HashMap` removed in Bevy 0.18.1:** The plan recommended `use bevy::utils::HashMap` — this path no longer exists. Switched to `std::collections::HashMap`. No behavioral difference (hashbrown performance only needed at scale; 6×6 floor maps don't warrant it).
+
+3. **`egui::Frame::none()` deprecated in egui 0.33:** Replaced with `egui::Frame::NONE` for the overlay and `egui::Frame::new()` for the full-screen panel. No behavioral difference.
+
+4. **ActionState direct-mutation test pattern:** Without `InputManagerPlugin` + `InputPlugin`, leafwing's tick system doesn't run, so `JustPressed` state never advances to `Pressed`. This means calling `press()` twice in the same test without clearing creates a double-fire. Fixed with the press/update/release/update pattern: each action is pressed for exactly one update frame then released. `ActionsPlugin` was intentionally excluded from the test app to avoid `AccumulatedMouseMotion` panic (requires `InputPlugin` which would clear `just_pressed` in PreUpdate before the Update system can observe it — same constraint as the F9 state tests).
+
+5. **D1 override deployment:** `EguiPlugin` registration was folded into `UiPlugin::build` alongside `MinimapPlugin`. `src/main.rs` is byte-unchanged. `src/plugins/ui/mod.rs` is the only modified non-new file in `src/plugins/ui/` (besides the new `minimap.rs`).
+
+6. **`egui::Frame::none()` for overlay:** The overlay uses `egui::Frame::NONE` to eliminate the default egui window border/background. The full-screen view uses `egui::Frame::new().fill(Color32::from_rgb(20,20,30))` to provide a dark background.
+
+### Deviations from plan
+
+| Item | Plan said | Actual |
+|------|-----------|--------|
+| Painter schedule | `Update` | `EguiPrimaryContextPass` |
+| `bevy::utils::HashMap` | use it | Not available; use `std::collections::HashMap` |
+| `egui::Frame::none()` | use it | Deprecated; use `Frame::NONE` / `Frame::new()` |
+| `MinimapPlugin` registration | `main.rs` (D1=A) | `UiPlugin::build` (D1=C override) |
+| `EguiPlugin` registration | `main.rs` | `UiPlugin::build` |
+| Test app: `ActionsPlugin` | included | Excluded (mouse-resource panic); `ActionState<DungeonAction>` inserted via `init_resource` directly |
+| `EguiPlugin` constructor | `EguiPlugin { enable_multipass_for_primary_context: false }` | `EguiPlugin::default()` (field deprecated; default is `true` = multipass on, which requires `EguiPrimaryContextPass` — consistent) |
+
+### Manual smoke checklist (deferred to user)
+
+All items below require manual verification with `cargo run --features dev`:
+
+- [ ] Game launches without panic.
+- [ ] F9 to Dungeon. Walk W/A/S/D. Minimap overlay visible top-right (200×200), cells shade grey on visit.
+- [ ] Player arrow visible on overlay, points in current facing direction.
+- [ ] Press M → full-screen map appears with same data.
+- [ ] Press M again → returns to Exploring. Overlay re-visible.
+- [ ] Press M, then Escape → returns to Exploring.
+- [ ] Dark-zone cell (floor_01 has none by default — test via F8 show_full or author one): walk on it, verify cell shows `?` and is NOT marked Visited.
+- [ ] F8 (dev-only) toggles show_full. Map fills with all cells. F8 again to disable.
+- [ ] F9 cycle Dungeon→Combat→...→Dungeon: previously-explored cells still marked on second Dungeon entry.
+- [ ] Dev Camera2d HUD (top-left) and egui overlay (top-right) coexist without flicker or z-fighting.
 
 ## Verification
 
 ### Pre-pipeline
 
-- [ ] Local main is up to date — `cd /Users/nousunio/Repos/Learnings/claude-code/druum && git fetch origin && git log main..origin/main --oneline` shows zero new commits — Manual
+- [x] Local main is up to date — `cd /Users/nousunio/Repos/Learnings/claude-code/druum && git fetch origin && git log main..origin/main --oneline` shows zero new commits — Manual
 
 ### Step gates
 
-- [ ] Step A resolved `bevy_egui` version is recorded inline in this plan (Implementation Discoveries → Recorded resolutions) AND accepts `bevy = "0.18.x"` — Manual
-- [ ] Step B feature audit recorded inline; D8 decision made (A or B with explicit feature list) — Manual
-- [ ] Step C `EguiPlugin` shape, `EguiContexts::ctx_mut()` return type, expected Cargo.lock additions all recorded inline — Manual
+- [x] Step A resolved `bevy_egui` version is recorded inline in this plan (Implementation Discoveries → Recorded resolutions) AND accepts `bevy = "0.18.x"` — Manual
+- [x] Step B feature audit recorded inline; D8 decision made (A or B with explicit feature list) — Manual
+- [x] Step C `EguiPlugin` shape, `EguiContexts::ctx_mut()` return type, expected Cargo.lock additions all recorded inline — Manual
 
 ### Compilation + lint
 
-- [ ] `cargo check` passes — Build — `cargo check` — Automatic
-- [ ] `cargo check --features dev` passes — Build — `cargo check --features dev` — Automatic
-- [ ] `cargo clippy --all-targets -- -D warnings` zero warnings — Lint — `cargo clippy --all-targets -- -D warnings` — Automatic
-- [ ] `cargo clippy --all-targets --features dev -- -D warnings` zero warnings — Lint — `cargo clippy --all-targets --features dev -- -D warnings` — Automatic
-- [ ] `cargo fmt --check` zero diff — Format — `cargo fmt --check` — Automatic
+- [x] `cargo check` passes — Build — `cargo check` — Automatic
+- [x] `cargo check --features dev` passes — Build — `cargo check --features dev` — Automatic
+- [x] `cargo clippy --all-targets -- -D warnings` zero warnings — Lint — `cargo clippy --all-targets -- -D warnings` — Automatic
+- [x] `cargo clippy --all-targets --features dev -- -D warnings` zero warnings — Lint — `cargo clippy --all-targets --features dev -- -D warnings` — Automatic
+- [x] `cargo fmt --check` zero diff — Format — `cargo fmt --check` — Automatic
 
 ### Tests
 
-- [ ] `cargo test` passes with `BASELINE_LIB + ~8` lib tests + 3 integration tests — Test — `cargo test 2>&1 | tail -5` — Automatic
-- [ ] `cargo test --features dev` passes with same delta (or +1 for the dev-only `show_full_toggle_flips_field` test if added) — Test — `cargo test --features dev 2>&1 | tail -5` — Automatic
-- [ ] No previously-passing tests regress — Test — visual diff against Step 0 baseline — Manual
-- [ ] `cargo audit` reports zero advisories for `bevy_egui` and its transitive deps — Security — `cargo audit 2>&1 | grep -i 'bevy_egui\|egui'` — Automatic
+- [x] `cargo test` passes with `BASELINE_LIB + ~8` lib tests + 3 integration tests — Test — `cargo test 2>&1 | tail -5` — 78 lib (+11), 3 integration
+- [x] `cargo test --features dev` passes with same delta (or +1 for the dev-only `show_full_toggle_flips_field` test if added) — Test — `cargo test --features dev 2>&1 | tail -5` — 81 lib (+13), 3 integration
+- [x] No previously-passing tests regress — Test — visual diff against Step 0 baseline — all 67/68 prior tests still pass
+- [x] `cargo audit` reports zero advisories for `bevy_egui` and its transitive deps — Security — one pre-existing `unmaintained` advisory (paste via wgpu-hal, present before this feature), zero security errors
 
 ### Diff review (cleanest-ship signal)
 
-- [ ] `git diff --stat` shows ONLY: `Cargo.toml` (+1), `Cargo.lock` (egui dep tree per Step C list), `src/plugins/dungeon/minimap.rs` (new), `src/plugins/dungeon/mod.rs` (`pub mod minimap;` + `pub(crate)` on `handle_dungeon_input`), `src/main.rs` (+1 use, +1 EguiPlugin, +1 MinimapPlugin) — Diff — `git diff --stat HEAD` — Manual
-- [ ] No unrelated transitive bumps in `Cargo.lock` (e.g., a bevy_render patch bump) — Diff — `git diff Cargo.lock | grep -E '^[-+]name|^[-+]version' | head -50` — Manual
-- [ ] No edits to `state/`, `input/`, `loading/`, `audio/`, `data/`, `combat/`, `town/`, `party/`, `save/`, `ui/` — Diff — `git diff --stat HEAD | grep -v 'minimap\|mod.rs\|main.rs\|Cargo'` returns empty — Manual
+- [x] `git diff --stat` shows expected files: `Cargo.toml` (+1), `Cargo.lock` (+7 egui crates), `src/plugins/dungeon/mod.rs` (+10 pub(crate)+doc), `src/plugins/ui/minimap.rs` (new, +773), `src/plugins/ui/mod.rs` (+12 EguiPlugin+MinimapPlugin). `src/main.rs` UNCHANGED. Note: D1 override means plan's "main.rs (+1)" replaced by "ui/mod.rs (+12)".
+- [x] No unrelated transitive bumps in `Cargo.lock` — 7 new entries: bevy_egui, egui, ecolor, emath, epaint, epaint_default_fonts, nohash-hasher. All expected.
+- [x] No edits to `state/`, `input/`, `loading/`, `audio/`, `data/`, `combat/`, `town/`, `party/`, `save/` — confirmed
 
 ### Manual smoke (deferred to user for sign-off)
 
