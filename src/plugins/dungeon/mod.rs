@@ -33,6 +33,7 @@
 //! Downstream consumers (#13 cell-trigger, #16 encounter) react to the new logical
 //! state on the commit frame, not after the tween completes.
 
+use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 
@@ -158,6 +159,25 @@ impl MovementAnimation {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DungeonGeometry;
 
+/// Marker on every flicker-driven `PointLight`: cell-anchored torches AND the
+/// player-carried torch (a grandchild of `DungeonCamera`). Filter for the
+/// `flicker_torches` system so untagged `PointLight`s are untouched.
+///
+/// `base_intensity` captures the spawn-time intensity so the flicker formula
+/// modulates around it (`light.intensity = base_intensity * factor`); the
+/// system never reads `light.intensity` itself, so the flicker remains stable
+/// across frames regardless of any one-frame race.
+///
+/// `phase_offset` desyncs each torch from its neighbors so the floor doesn't
+/// pulse in sync. For cell torches it is a deterministic hash of the cell
+/// coords (see `torch_phase`); for the carried torch it is `f32::consts::PI`
+/// so the carrier is half a wavelength out of phase with the (0,0)-cell torch.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Torch {
+    pub base_intensity: f32,
+    pub phase_offset: f32,
+}
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
@@ -201,6 +221,7 @@ impl Plugin for DungeonPlugin {
                         )
                         .before(animate_movement),
                     animate_movement.run_if(in_state(GameState::Dungeon)),
+                    flicker_torches.run_if(in_state(GameState::Dungeon)),
                 ),
             );
 
@@ -289,6 +310,25 @@ fn wall_material(
     }
 }
 
+/// Deterministic per-cell phase offset for torch flicker. Same cell coords
+/// always produce the same offset, so floors flicker identically across
+/// playthroughs (stable for tests; matches save-replay determinism intent).
+fn torch_phase(x: u32, y: u32) -> f32 {
+    // (x * 31) XOR (y * 17), scaled into a roughly-uniform float spread.
+    // Not cryptographic — just "spread the phases" so neighbors don't sync.
+    ((x.wrapping_mul(31)) ^ (y.wrapping_mul(17))) as f32 * 0.123
+}
+
+/// Two-sine flicker formula. Returns a multiplier to apply to base intensity.
+/// Theoretical peak amplitude is ±15% (sum of two sines at 0.10 + 0.05 weights),
+/// but clamped to `[0.80, 1.20]` defensively (Feature #9 research §Pitfall 5 —
+/// real torches vary 5-15%; >20% reads as "broken light bulb" not "flame").
+fn flicker_factor(t: f32, phase: f32) -> f32 {
+    let s1 = bevy::math::ops::sin(t * 6.4 + phase);
+    let s2 = bevy::math::ops::sin(t * 23.0 + phase * 1.7);
+    (1.0 + 0.10 * s1 + 0.05 * s2).clamp(0.80, 1.20)
+}
+
 // ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
@@ -323,6 +363,8 @@ fn spawn_party_and_camera(
     let start_pos = GridPosition { x: sx, y: sy };
     let world_pos = grid_to_world(start_pos);
     let initial_rotation = facing_to_quat(facing);
+    let fog_color = floor.lighting.fog.color.into_color();
+    let fog_density = floor.lighting.fog.density;
 
     commands.spawn((
         GridPosition { x: sx, y: sy },
@@ -334,19 +376,34 @@ fn spawn_party_and_camera(
             Camera3d::default(),
             Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
             DungeonCamera,
+            // Per-floor fog (Feature #9). Falloff is ALWAYS Exponential — DistanceFog::default()
+            // falloff is Linear { 0.0, 100.0 } which is invisible at dungeon scale.
+            DistanceFog {
+                color: fog_color,
+                falloff: FogFalloff::Exponential {
+                    density: fog_density,
+                },
+                ..default()
+            },
             // Wizardry-style torch: warm point light at the camera's eye position.
             // Positioned at the camera origin (local (0,0,0)) — slightly forward/below
             // adjustments can be made in Feature #25 polish if a "held torch" offset is
             // desired. Despawned recursively with PlayerParty on OnExit(Dungeon).
+            // DO NOT MODIFY carried torch properties — Feature #8 user override.
+            // Feature #9 only appends the Torch marker so the flicker system finds it.
             children![(
                 PointLight {
                     color: Color::srgb(1.0, 0.85, 0.55), // warm yellow-orange torch flame
                     intensity: 60_000.0, // bright torch — overpowers near-black ambient
                     range: 12.0,         // ~6 cells of light radius
-                    shadows_enabled: false, // shadows are Feature #9
+                    shadows_enabled: false,
                     ..default()
                 },
                 Transform::from_xyz(0.0, 0.0, 0.0),
+                Torch {
+                    base_intensity: 60_000.0,
+                    phase_offset: std::f32::consts::PI,
+                },
             )],
         )],
     ));
@@ -380,10 +437,10 @@ fn despawn_dungeon_entities(
     info!("Despawned PlayerParty + dungeon geometry on OnExit(Dungeon); ambient restored");
 }
 
-/// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell and wall
-/// plates per renderable edge. Also sets `GlobalAmbientLight` to a near-black
-/// dungeon override for Wizardry-style torchlight atmosphere; the player's
-/// `PointLight` (child of `DungeonCamera`) is the primary illumination source.
+/// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell, wall
+/// plates per renderable edge, AND per-cell torches from `floor.light_positions`
+/// (Feature #9). Also sets `GlobalAmbientLight` from `floor.lighting.ambient_brightness`
+/// — defaults to `1.0` (near-black) for floors that don't override.
 ///
 /// Asset-tolerant: warns and returns silently if `DungeonAssets` or the floor handle
 /// is not yet loaded (mirrors `spawn_party_and_camera`).
@@ -532,13 +589,48 @@ fn spawn_dungeon_geometry(
         }
     }
 
-    // Wizardry-style torchlight: set scene-wide ambient to near-black (1.0 lux ≈
-    // moonlight). The player's PointLight (child of DungeonCamera, intensity 4000)
-    // dominates near the player and falls off into darkness at corridor distance.
-    // Restored to default on OnExit (see despawn_dungeon_entities).
+    // Per-cell torches (Feature #9). Each entry in floor.light_positions becomes
+    // one PointLight entity at sconce height (CELL_HEIGHT * 0.8 = 2.4 world units).
+    // Tagged Torch (flicker filter) + DungeonGeometry (OnExit cleanup).
+    // Tolerant of out-of-range fields: ColorRgb::into_color clamps channels.
+    // NaN guard: skip any torch with NaN intensity/range to avoid panics in
+    // Bevy's clustering math (verified bevy_light/cluster/assign.rs:268-280).
+    for torch in &floor.light_positions {
+        if !torch.intensity.is_finite() || !torch.range.is_finite() {
+            warn!(
+                "Skipping torch at ({}, {}) — non-finite intensity {} or range {}",
+                torch.x, torch.y, torch.intensity, torch.range
+            );
+            continue;
+        }
+        let world_x = torch.x as f32 * CELL_SIZE;
+        let world_z = torch.y as f32 * CELL_SIZE;
+        let world_y = CELL_HEIGHT * 0.8; // sconce height (~2.4)
+        let phase = torch_phase(torch.x, torch.y);
+        commands.spawn((
+            PointLight {
+                color: torch.color.into_color(),
+                intensity: torch.intensity,
+                range: torch.range,
+                shadows_enabled: torch.shadows,
+                ..default()
+            },
+            Transform::from_xyz(world_x, world_y, world_z),
+            DungeonGeometry,
+            Torch {
+                base_intensity: torch.intensity,
+                phase_offset: phase,
+            },
+        ));
+    }
+
+    // Per-floor ambient (Feature #9). LightingConfig::default() has
+    // ambient_brightness: 1.0 — preserves Feature #8's near-black behavior for
+    // floors that don't override. Restored to GlobalAmbientLight::default() on
+    // OnExit (see despawn_dungeon_entities).
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
-        brightness: 1.0,
+        brightness: floor.lighting.ambient_brightness,
         ..default()
     });
 
@@ -690,6 +782,25 @@ fn animate_movement(
             transform.rotation = anim.to_rotation;
             commands.entity(entity).remove::<MovementAnimation>();
         }
+    }
+}
+
+/// `Update` — modulate every `Torch`-tagged `PointLight::intensity` per frame
+/// using a deterministic two-sine formula (`flicker_factor`). Runs always in
+/// `GameState::Dungeon` (no `DungeonSubState` gate — torches flicker even with
+/// the menu open, immersion preservation).
+///
+/// **Filter:** `With<Torch>` is mandatory. Removing it would touch every
+/// `PointLight` in the world (future spell effects, UI lights, etc.).
+/// The marker is the contract.
+///
+/// **Determinism:** uses `Time::elapsed_secs()` and the per-entity
+/// `Torch::phase_offset` only — no `rand`, no wall-clock seeding. The same
+/// floor at the same `t` produces the same intensities every run.
+fn flicker_torches(time: Res<Time>, mut lights: Query<(&mut PointLight, &Torch)>) {
+    let t = time.elapsed_secs();
+    for (mut light, torch) in &mut lights {
+        light.intensity = torch.base_intensity * flicker_factor(t, torch.phase_offset);
     }
 }
 
