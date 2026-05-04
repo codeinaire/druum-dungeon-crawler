@@ -173,6 +173,94 @@ pub struct CellFeatures {
     pub event_id: Option<String>,
 }
 
+/// Wrapper around `(R, G, B)` channels in `[0.0, 1.0]`. Wraps the serde gap that
+/// `bevy::Color` cannot cross without enabling `bevy_color/serialize` (which is
+/// off in Druum's `bevy = { features = ["3d", ...] }` declaration; enabling it
+/// would cascade 12 transitive features and modify Cargo.toml — see Feature #9
+/// research §Pitfall 1). DO NOT replace with `bevy::Color`.
+///
+/// `into_color()` clamps each channel to `[0.0, 1.0]` for trust-boundary safety.
+#[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq)]
+pub struct ColorRgb(pub f32, pub f32, pub f32);
+
+impl ColorRgb {
+    /// Convert to a Bevy sRGB `Color`. Channels are clamped to `[0.0, 1.0]`
+    /// to defuse out-of-range values from authored RON (e.g., a typo
+    /// producing `(5.0, -1.0, 99.0)` would otherwise yield HDR-bright output).
+    pub fn into_color(self) -> Color {
+        Color::srgb(
+            self.0.clamp(0.0, 1.0),
+            self.1.clamp(0.0, 1.0),
+            self.2.clamp(0.0, 1.0),
+        )
+    }
+}
+
+/// One cell-anchored torch. Spawned as a `PointLight` entity at world
+/// `(x * CELL_SIZE, CELL_HEIGHT * 0.8, y * CELL_SIZE)` (sconce-height) on
+/// `OnEnter(GameState::Dungeon)`. Tagged `Torch` (flicker query) and
+/// `DungeonGeometry` (OnExit cleanup).
+///
+/// `shadows: true` enables cubemap shadow casting. Bevy 0.18 stable-sorts
+/// shadow-enabled lights by entity ID and truncates at the GPU cap
+/// (`max_texture_array_layers / 6`, typically ~42). To match the spec's
+/// "4 per visible region" cap, author `shadows: true` on at most 3-4 entries
+/// per floor — the rest stay `false`.
+#[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+pub struct TorchData {
+    pub x: u32,
+    pub y: u32,
+    pub color: ColorRgb,
+    pub intensity: f32,
+    pub range: f32,
+    pub shadows: bool,
+}
+
+/// Per-floor fog parameters, applied to the dungeon `Camera3d`'s `DistanceFog`
+/// component on `OnEnter(GameState::Dungeon)`. Falloff is always
+/// `FogFalloff::Exponential { density }` — `DistanceFog::default()` falloff is
+/// `Linear { 0.0, 100.0 }` which is invisible at dungeon scale.
+#[derive(Reflect, Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct FogConfig {
+    pub color: ColorRgb,
+    pub density: f32,
+}
+
+impl Default for FogConfig {
+    /// Warm dark grey fog at moderate density — atmospheric default for stone
+    /// dungeons. Floors that omit `fog:` in their `lighting:` block get this.
+    fn default() -> Self {
+        Self {
+            color: ColorRgb(0.10, 0.09, 0.08),
+            density: 0.12,
+        }
+    }
+}
+
+/// Per-floor lighting configuration aggregating fog + ambient brightness.
+/// All fields `#[serde(default)]` via the struct-level attribute so floors
+/// can omit the entire `lighting:` block (defaults atmospherically), or
+/// override individual fields (e.g., only `ambient_brightness`).
+#[derive(Reflect, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct LightingConfig {
+    pub fog: FogConfig,
+    /// Ambient brightness in `GlobalAmbientLight` units. `1.0` is near-black
+    /// (matches Feature #8's hard-coded value); `80.0` is the `LightPlugin`
+    /// default (full-bright). Floors that omit this default to `1.0`
+    /// (preserves Feature #8's torchlight-dominant atmosphere).
+    pub ambient_brightness: f32,
+}
+
+impl Default for LightingConfig {
+    fn default() -> Self {
+        Self {
+            fog: FogConfig::default(),
+            ambient_brightness: 1.0,
+        }
+    }
+}
+
 /// A single dungeon floor — the primary asset type loaded by `RonAssetPlugin`.
 ///
 /// `walls` and `features` are indexed `[y][x]` (row-major, y-down).
@@ -190,6 +278,16 @@ pub struct DungeonFloor {
     pub features: Vec<Vec<CellFeatures>>,
     pub entry_point: (u32, u32, Direction),
     pub encounter_table: String,
+    /// Per-cell torch positions (Feature #9). Empty by default — floors that
+    /// don't author torches still load. Each entry spawns one `PointLight`
+    /// entity at sconce height in cell `(x, y)`.
+    #[serde(default)]
+    pub light_positions: Vec<TorchData>,
+    /// Per-floor fog + ambient configuration (Feature #9). `LightingConfig::default()`
+    /// is an atmospheric starting point (warm grey fog, near-black ambient);
+    /// floors override per-floor for varied moods.
+    #[serde(default)]
+    pub lighting: LightingConfig,
 }
 
 impl DungeonFloor {
@@ -350,6 +448,8 @@ mod tests {
             features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
+            light_positions: Vec::new(),
+            lighting: LightingConfig::default(),
         }
     }
 
@@ -437,6 +537,8 @@ mod tests {
             ],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
+            light_positions: Vec::new(),
+            lighting: LightingConfig::default(),
         };
 
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
@@ -446,6 +548,68 @@ mod tests {
             original, parsed,
             "round-trip changed the DungeonFloor value"
         );
+    }
+
+    #[test]
+    fn color_rgb_clamps_out_of_range_channels() {
+        let color = ColorRgb(5.0, -1.0, 0.5).into_color();
+        let srgba = color.to_srgba();
+        assert!(srgba.red <= 1.0 && srgba.red >= 0.0, "red clamped");
+        assert!(srgba.green <= 1.0 && srgba.green >= 0.0, "green clamped");
+        assert!((srgba.blue - 0.5).abs() < 1e-6, "blue passthrough");
+    }
+
+    #[test]
+    fn dungeon_floor_round_trips_with_lighting() {
+        let original = DungeonFloor {
+            name: "lighting test".into(),
+            width: 1,
+            height: 1,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default()]],
+            features: vec![vec![CellFeatures::default()]],
+            entry_point: (0, 0, Direction::North),
+            encounter_table: "test".into(),
+            light_positions: vec![TorchData {
+                x: 0,
+                y: 0,
+                color: ColorRgb(1.0, 0.7, 0.3),
+                intensity: 6000.0,
+                range: 10.0,
+                shadows: true,
+            }],
+            lighting: LightingConfig {
+                fog: FogConfig {
+                    color: ColorRgb(0.10, 0.09, 0.08),
+                    density: 0.15,
+                },
+                ambient_brightness: 2.0,
+            },
+        };
+        let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
+            .expect("serialize");
+        let parsed: DungeonFloor = ron::de::from_str(&serialized).expect("deserialize");
+        assert_eq!(
+            original, parsed,
+            "round-trip changed the DungeonFloor value"
+        );
+    }
+
+    #[test]
+    fn dungeon_floor_omits_lighting_field_loads() {
+        // Verifies #[serde(default)] on light_positions + lighting: a RON snippet
+        // without those fields still parses (preserves backward compat with
+        // existing assets).
+        let ron_str = r#"(
+            name: "no lighting", width: 1, height: 1, floor_number: 1,
+            walls: [[(north: Open, south: Open, east: Open, west: Open)]],
+            features: [[()]],
+            entry_point: (0, 0, North),
+            encounter_table: "test",
+        )"#;
+        let parsed: DungeonFloor = ron::de::from_str(ron_str).expect("parse");
+        assert!(parsed.light_positions.is_empty());
+        assert_eq!(parsed.lighting, LightingConfig::default());
     }
 
     // -------------------------------------------------------------------------

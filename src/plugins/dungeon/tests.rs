@@ -182,7 +182,7 @@ fn make_test_app() -> App {
 /// `make_floor` (which is `#[cfg(test)]`-private to `data/dungeon.rs`).
 /// ~20 LOC of duplication is cheaper than refactoring a frozen file.
 fn make_open_floor(w: u32, h: u32) -> DungeonFloor {
-    use crate::data::dungeon::{CellFeatures, WallMask};
+    use crate::data::dungeon::{CellFeatures, LightingConfig, WallMask};
     DungeonFloor {
         name: "test".into(),
         width: w,
@@ -192,6 +192,8 @@ fn make_open_floor(w: u32, h: u32) -> DungeonFloor {
         features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
+        light_positions: Vec::new(),
+        lighting: LightingConfig::default(),
     }
 }
 
@@ -437,7 +439,7 @@ fn handle_dungeon_input_drops_input_during_animation() {
     // Use a 3×3 floor but with entry at (1,1) and 5×5 to have room.
     // Re-insert a 5×5 floor with entry (1,1).
     {
-        use crate::data::dungeon::{CellFeatures, WallMask};
+        use crate::data::dungeon::{CellFeatures, LightingConfig, WallMask};
         let floor = DungeonFloor {
             name: "test5x5".into(),
             width: 5,
@@ -447,6 +449,8 @@ fn handle_dungeon_input_drops_input_during_animation() {
             features: vec![vec![CellFeatures::default(); 5]; 5],
             entry_point: (2, 2, Direction::North),
             encounter_table: "test_table".into(),
+            light_positions: Vec::new(),
+            lighting: LightingConfig::default(),
         };
         insert_test_floor(&mut app, floor);
     }
@@ -552,7 +556,7 @@ fn animate_movement_completes_in_duration_secs() {
 /// Counterpart to `make_open_floor`. Used for the maximum-renderable-walls
 /// regression test.
 fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
-    use crate::data::dungeon::{CellFeatures, WallMask};
+    use crate::data::dungeon::{CellFeatures, LightingConfig, WallMask};
     let solid_mask = WallMask {
         north: WallType::Solid,
         south: WallType::Solid,
@@ -568,6 +572,8 @@ fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
         features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
+        light_positions: Vec::new(),
+        lighting: LightingConfig::default(),
     }
 }
 
