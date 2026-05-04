@@ -52,9 +52,10 @@ use crate::plugins::state::{DungeonSubState, GameState};
 pub const CELL_SIZE: f32 = 2.0;
 
 /// Local Y offset of the `Camera3d` child relative to the `PlayerParty` root.
-/// 0.7 produces a "forward-facing" feel relative to Feature #8's planned 3.0
-/// wall height.
-pub const EYE_HEIGHT: f32 = 0.7;
+/// 1.8 places the eye at 3/5 of the 3.0 cell height — natural human-eye-level
+/// for a 1st-person crawler. Tuned during Feature #8 manual smoke (originally
+/// 0.7 felt waist-level).
+pub const EYE_HEIGHT: f32 = 1.8;
 
 /// Duration of a forward/backward/strafe translation tween (seconds).
 pub const MOVE_DURATION_SECS: f32 = 0.18;
@@ -703,11 +704,26 @@ fn animate_movement(
 #[derive(Component)]
 struct DebugGridHud;
 
-/// `OnEnter(GameState::Dungeon)` (dev-only) — spawn a top-left corner
-/// `Text` overlay showing the player's current grid coordinates and facing.
+/// `OnEnter(GameState::Dungeon)` (dev-only) — spawn a `Camera2d` UI overlay
+/// camera (rendered on top of the 3D scene) and a top-left corner `Text`
+/// overlay showing the player's current grid coordinates and facing.
 /// Updated every frame by `update_debug_grid_hud`.
+///
+/// The Camera2d is required because `bevy_ui` text rendering needs a 2D
+/// camera target. `Order: 1` puts it above the dungeon's `Camera3d` (default
+/// order 0). `ClearColorConfig::None` keeps the 3D scene visible underneath.
 #[cfg(feature = "dev")]
 fn spawn_debug_grid_hud(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        DebugGridHud,
+    ));
+
     commands.spawn((
         Text::new("Position: -- | Facing: --"),
         TextFont {
