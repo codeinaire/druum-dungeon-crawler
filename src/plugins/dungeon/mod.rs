@@ -341,8 +341,8 @@ fn spawn_party_and_camera(
             children![(
                 PointLight {
                     color: Color::srgb(1.0, 0.85, 0.55), // warm yellow-orange torch flame
-                    intensity: 4000.0, // bright torch — overpowers near-black ambient
-                    range: 8.0,        // ~4 cells of light radius
+                    intensity: 60_000.0, // bright torch — overpowers near-black ambient
+                    range: 12.0,        // ~6 cells of light radius
                     shadows_enabled: false, // shadows are Feature #9
                     ..default()
                 },
