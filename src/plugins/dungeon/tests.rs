@@ -723,3 +723,41 @@ fn flicker_is_deterministic_for_same_phase_and_t() {
     let f3 = super::flicker_factor(1.234, 1.5);
     assert_ne!(f1, f3, "different phase must produce different factor");
 }
+
+#[test]
+fn flicker_torches_modulates_carried_torch_intensity() {
+    // End-to-end coverage: verifies flicker_torches is registered, runs in
+    // GameState::Dungeon, and modulates the carried torch's PointLight.intensity.
+    // Closes the gap left by removing the cell-torch flicker test during the
+    // Feature #9 cell-torch strip — without this test, an accidental drop of
+    // flicker_torches from DungeonPlugin::build would pass all other tests.
+    let mut app = make_test_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        100,
+    )));
+    insert_test_floor(&mut app, make_open_floor(3, 3));
+    advance_into_dungeon(&mut app);
+    // Advance one more frame so elapsed_secs > 0 (flicker_factor at t=0 returns
+    // 1.0 exactly because both sines are zero — would not catch a skipped run).
+    app.update();
+
+    let intensity = app
+        .world_mut()
+        .query_filtered::<&PointLight, With<Torch>>()
+        .single(app.world())
+        .unwrap()
+        .intensity;
+
+    // Carried torch base_intensity is 60_000; flicker_factor is clamped to
+    // [0.80, 1.20], so intensity must land in [48_000, 72_000].
+    assert!(
+        (48_000.0..=72_000.0).contains(&intensity),
+        "Torch intensity {intensity} must be in the flicker band [48_000, 72_000]"
+    );
+    // And it must not be exactly base_intensity after a non-zero tick (unless
+    // both sines hit a zero crossing simultaneously — vanishingly unlikely).
+    assert_ne!(
+        intensity, 60_000.0,
+        "Torch intensity should not be exactly base_intensity after a non-zero tick"
+    );
+}

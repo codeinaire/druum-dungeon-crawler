@@ -1,5 +1,9 @@
 //! App-level integration test for Feature #8: 3D Dungeon Renderer.
 //!
+//! Note: Feature #9 added per-cell torch entities during development but
+//! removed them before merge (scope reduction). The carried torch is a child
+//! of `DungeonCamera` and is not tagged `DungeonGeometry`. Count remains 120.
+//!
 //! Verifies that `spawn_dungeon_geometry` correctly spawns 120 entities tagged
 //! with `DungeonGeometry` when `GameState::Dungeon` is entered with a loaded
 //! `floor_01`. The math:
