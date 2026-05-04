@@ -2,7 +2,7 @@
 
 **Plan:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260504-050000-feature-9-dungeon-lighting-atmosphere.md`
 **Date:** 2026-05-04
-**Status:** Complete (manual visual smoke test pending user execution)
+**Status:** Cell torches removed in followup commit (2026-05-04). See **Followup correction** section at the bottom of this file. Final scope: fog + carried-torch flicker + per-floor lighting RON (no cell torches authored).
 
 ## Steps Completed
 
@@ -105,3 +105,54 @@ Document any visual surprises (color tuning, fog density, torch intensity) in Im
 5. `4773c89` — test(dungeon): cover fog, torch spawn, flicker, and cleanup (Step 8)
 6. `b3aaf4e` — test(integration): bump dungeon_geometry count to 124 (4 torches) (Step 9)
 7. `7ec75d5` — fix(integration): fix doc_lazy_continuation clippy lint in dungeon_geometry.rs (Step 9 follow-up)
+
+---
+
+## Followup correction (2026-05-04)
+
+User clarified after smoke-test review that the original Decision 1 answer ("just keep carried torch for now and yes have it flicker, the code is the source of truth so don't change it") was a scope reduction — no cell torches wanted in #9 at all. Orchestrator-side prompt misread the intent as Option A (keep carried + add cell), and dispatched the planner+implementer to add cell torches. Memory captured at `~/.claude/projects/-Users-nousunio-Repos-Learnings-claude-code-druum/memory/feedback_user_answers_to_options.md`.
+
+Per user direction, history was NOT rewritten. A single followup commit removes cell-torch surface area while keeping everything the user did want (fog, carried-torch flicker, test relocation, per-floor lighting RON for fog/ambient).
+
+### What was removed
+
+- `TorchData` struct from `src/data/dungeon.rs` and the `light_positions: Vec<TorchData>` field on `DungeonFloor`.
+- `TorchData` re-export from `src/data/mod.rs`.
+- 4 torch entries from `assets/dungeons/floor_01.dungeon.ron` (the `light_positions: [...]` block + comment).
+- Cell-torch spawn loop in `spawn_dungeon_geometry` (the `for torch in &floor.light_positions` block + NaN guard).
+- `torch_phase(x, y)` private helper (no longer called — carried torch uses literal `f32::consts::PI`).
+- Two cell-torch tests: `torches_spawned_per_light_positions` and `flicker_modulates_intensity_over_time` (the latter required cell torches to test the system end-to-end).
+- The `insert_test_floor_with_torches` test helper.
+- Three `light_positions: Vec::new()` entries in test-helper `DungeonFloor` literals (now drops the field entirely).
+- Updated doc comments on `Torch`, `spawn_dungeon_geometry`, and the integration-test header to remove cell-torch references.
+
+### What was kept
+
+- Test relocation (`mod.rs` ↔ `tests.rs`) — Decision 2.
+- `DistanceFog` on `DungeonCamera` with `Exponential { density }` falloff — drives the "atmosphere" half of §9.
+- `Torch` marker component + `flicker_factor` helper + `flicker_torches` system — drives the carried-torch flicker.
+- `ColorRgb`, `FogConfig`, `LightingConfig` types + `lighting: LightingConfig` field on `DungeonFloor` + `lighting:` block in `floor_01.dungeon.ron` — per-floor fog/ambient tuning.
+- Per-floor `ambient_brightness` flowing into `GlobalAmbientLight` on enter / restored to `default()` on exit.
+- Carried-torch `Torch { base_intensity: 60_000.0, phase_offset: PI }` marker on the existing carried `PointLight` — properties otherwise sacrosanct per user override.
+- Tests still passing: `distance_fog_attached_to_dungeon_camera`, `flicker_is_deterministic_for_same_phase_and_t`, `on_exit_dungeon_despawns_all_dungeon_geometry` (with carried-torch despawn assertion), 3 ron round-trip tests, all earlier tests.
+
+### Verification (post-strip)
+
+| Command | Result |
+|---|---|
+| `cargo check` | PASS — zero warnings |
+| `cargo check --features dev` | PASS — zero warnings |
+| `cargo clippy --all-targets -- -D warnings` | PASS — zero warnings |
+| `cargo clippy --all-targets --features dev -- -D warnings` | PASS — zero warnings |
+| `cargo fmt --check` | PASS — zero diff |
+| `cargo test` | PASS — **66 lib + 3 integration** (down 2 cell-torch tests from 68) |
+| `cargo test --features dev` | PASS — **67 lib + 3 integration** (down 2 from 69) |
+| `git diff Cargo.toml Cargo.lock` | empty (Δ deps still 0) |
+
+### Manual smoke test still required
+
+The original Step 10 manual smoke test is still pending — but the checklist is now smaller:
+- Fog visible at corridor distance
+- Subtle carried-torch flicker (not strobing — `[0.80, 1.20]` band on intensity 60_000)
+- No 4 cell torches anywhere in floor_01 (regression check on the strip)
+- Clean OnExit/OnEnter cycle on F9 (carried torch despawns and respawns; no orphans)

@@ -2,8 +2,8 @@
 
 **Task:** Drive research → plan pipeline (PAUSE at plan-approval) for Feature #9: Dungeon Lighting & Atmosphere from the dungeon crawler roadmap. Add `DistanceFog` (per-floor RON parameters), low warm `GlobalAmbientLight`, per-cell `PointLight` torches placed via `light_positions` field on `DungeonFloor`, flicker animation, shadow-cap of 4 per visible region, sample torches in `floor_01.dungeon.ron`. Reconcile with Feature #8's user-override player-attached torch (Wizardry torchlight) — KEEP / REPLACE / per-floor RON option is a Category B decision. Module split (`renderer.rs` extraction, mod.rs is now ~1355 LOC) is also Category B. Bevy 0.18.1, Δ deps = 0. Final report at plan stage MUST include plan path + concise summary; parent dispatches implementer manually because `SendMessage` does not actually resume returned agents (confirmed across Features #3-#8).
 
-**Status:** in-progress (paused at plan-approval — parent dispatches implementer manually)
-**Last Completed Step:** 2
+**Status:** implementation complete (cell torches removed in followup commit) — manual visual smoke test pending user
+**Last Completed Step:** 3 (+ followup correction on 2026-05-04 — see implementation summary §Followup correction)
 
 ## Artifacts
 
@@ -11,9 +11,9 @@
 | ---- | ----------- | ---------------------------------------- |
 | 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260504-040000-feature-9-dungeon-lighting-atmosphere.md |
 | 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260504-050000-feature-9-dungeon-lighting-atmosphere.md |
-| 3    | Implement   | (out of scope — parent dispatches manually) |
-| 4    | Ship        | (out of scope)                           |
-| 5    | Code Review | (out of scope)                           |
+| 3    | Implement   | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260504-050000-feature-9-dungeon-lighting-atmosphere.md (8 commits on `ja-branch-3`, all 7 verification commands pass with zero warnings, Cargo.toml/lock byte-unchanged, 68 lib + 3 integration default / 69 lib + 3 integration with --features dev) |
+| 4    | Ship        | pending                                  |
+| 5    | Code Review | pending                                  |
 
 ## Research Summary (Step 1)
 

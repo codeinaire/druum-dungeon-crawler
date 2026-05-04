@@ -159,19 +159,17 @@ impl MovementAnimation {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DungeonGeometry;
 
-/// Marker on every flicker-driven `PointLight`: cell-anchored torches AND the
-/// player-carried torch (a grandchild of `DungeonCamera`). Filter for the
-/// `flicker_torches` system so untagged `PointLight`s are untouched.
+/// Marker on the player-carried `PointLight` (a grandchild of `DungeonCamera`).
+/// Filter for the `flicker_torches` system so untagged `PointLight`s are
+/// untouched.
 ///
 /// `base_intensity` captures the spawn-time intensity so the flicker formula
 /// modulates around it (`light.intensity = base_intensity * factor`); the
 /// system never reads `light.intensity` itself, so the flicker remains stable
 /// across frames regardless of any one-frame race.
 ///
-/// `phase_offset` desyncs each torch from its neighbors so the floor doesn't
-/// pulse in sync. For cell torches it is a deterministic hash of the cell
-/// coords (see `torch_phase`); for the carried torch it is `f32::consts::PI`
-/// so the carrier is half a wavelength out of phase with the (0,0)-cell torch.
+/// `phase_offset` is `f32::consts::PI` for the carried torch — chosen so it
+/// stays out of sync with any future cell-anchored torches added later.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Torch {
     pub base_intensity: f32,
@@ -310,15 +308,6 @@ fn wall_material(
     }
 }
 
-/// Deterministic per-cell phase offset for torch flicker. Same cell coords
-/// always produce the same offset, so floors flicker identically across
-/// playthroughs (stable for tests; matches save-replay determinism intent).
-fn torch_phase(x: u32, y: u32) -> f32 {
-    // (x * 31) XOR (y * 17), scaled into a roughly-uniform float spread.
-    // Not cryptographic — just "spread the phases" so neighbors don't sync.
-    ((x.wrapping_mul(31)) ^ (y.wrapping_mul(17))) as f32 * 0.123
-}
-
 /// Two-sine flicker formula. Returns a multiplier to apply to base intensity.
 /// Theoretical peak amplitude is ±15% (sum of two sines at 0.10 + 0.05 weights),
 /// but clamped to `[0.80, 1.20]` defensively (Feature #9 research §Pitfall 5 —
@@ -437,10 +426,10 @@ fn despawn_dungeon_entities(
     info!("Despawned PlayerParty + dungeon geometry on OnExit(Dungeon); ambient restored");
 }
 
-/// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell, wall
-/// plates per renderable edge, AND per-cell torches from `floor.light_positions`
-/// (Feature #9). Also sets `GlobalAmbientLight` from `floor.lighting.ambient_brightness`
-/// — defaults to `1.0` (near-black) for floors that don't override.
+/// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell and wall
+/// plates per renderable edge. Also sets `GlobalAmbientLight` from
+/// `floor.lighting.ambient_brightness` — defaults to `1.0` (near-black) for
+/// floors that don't override.
 ///
 /// Asset-tolerant: warns and returns silently if `DungeonAssets` or the floor handle
 /// is not yet loaded (mirrors `spawn_party_and_camera`).
@@ -587,41 +576,6 @@ fn spawn_dungeon_geometry(
                 ));
             }
         }
-    }
-
-    // Per-cell torches (Feature #9). Each entry in floor.light_positions becomes
-    // one PointLight entity at sconce height (CELL_HEIGHT * 0.8 = 2.4 world units).
-    // Tagged Torch (flicker filter) + DungeonGeometry (OnExit cleanup).
-    // Tolerant of out-of-range fields: ColorRgb::into_color clamps channels.
-    // NaN guard: skip any torch with NaN intensity/range to avoid panics in
-    // Bevy's clustering math (verified bevy_light/cluster/assign.rs:268-280).
-    for torch in &floor.light_positions {
-        if !torch.intensity.is_finite() || !torch.range.is_finite() {
-            warn!(
-                "Skipping torch at ({}, {}) — non-finite intensity {} or range {}",
-                torch.x, torch.y, torch.intensity, torch.range
-            );
-            continue;
-        }
-        let world_x = torch.x as f32 * CELL_SIZE;
-        let world_z = torch.y as f32 * CELL_SIZE;
-        let world_y = CELL_HEIGHT * 0.8; // sconce height (~2.4)
-        let phase = torch_phase(torch.x, torch.y);
-        commands.spawn((
-            PointLight {
-                color: torch.color.into_color(),
-                intensity: torch.intensity,
-                range: torch.range,
-                shadows_enabled: torch.shadows,
-                ..default()
-            },
-            Transform::from_xyz(world_x, world_y, world_z),
-            DungeonGeometry,
-            Torch {
-                base_intensity: torch.intensity,
-                phase_offset: phase,
-            },
-        ));
     }
 
     // Per-floor ambient (Feature #9). LightingConfig::default() has

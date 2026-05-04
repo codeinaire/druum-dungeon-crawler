@@ -196,26 +196,6 @@ impl ColorRgb {
     }
 }
 
-/// One cell-anchored torch. Spawned as a `PointLight` entity at world
-/// `(x * CELL_SIZE, CELL_HEIGHT * 0.8, y * CELL_SIZE)` (sconce-height) on
-/// `OnEnter(GameState::Dungeon)`. Tagged `Torch` (flicker query) and
-/// `DungeonGeometry` (OnExit cleanup).
-///
-/// `shadows: true` enables cubemap shadow casting. Bevy 0.18 stable-sorts
-/// shadow-enabled lights by entity ID and truncates at the GPU cap
-/// (`max_texture_array_layers / 6`, typically ~42). To match the spec's
-/// "4 per visible region" cap, author `shadows: true` on at most 3-4 entries
-/// per floor — the rest stay `false`.
-#[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-pub struct TorchData {
-    pub x: u32,
-    pub y: u32,
-    pub color: ColorRgb,
-    pub intensity: f32,
-    pub range: f32,
-    pub shadows: bool,
-}
-
 /// Per-floor fog parameters, applied to the dungeon `Camera3d`'s `DistanceFog`
 /// component on `OnEnter(GameState::Dungeon)`. Falloff is always
 /// `FogFalloff::Exponential { density }` — `DistanceFog::default()` falloff is
@@ -278,11 +258,6 @@ pub struct DungeonFloor {
     pub features: Vec<Vec<CellFeatures>>,
     pub entry_point: (u32, u32, Direction),
     pub encounter_table: String,
-    /// Per-cell torch positions (Feature #9). Empty by default — floors that
-    /// don't author torches still load. Each entry spawns one `PointLight`
-    /// entity at sconce height in cell `(x, y)`.
-    #[serde(default)]
-    pub light_positions: Vec<TorchData>,
     /// Per-floor fog + ambient configuration (Feature #9). `LightingConfig::default()`
     /// is an atmospheric starting point (warm grey fog, near-black ambient);
     /// floors override per-floor for varied moods.
@@ -448,7 +423,6 @@ mod tests {
             features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
-            light_positions: Vec::new(),
             lighting: LightingConfig::default(),
         }
     }
@@ -537,7 +511,6 @@ mod tests {
             ],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
-            light_positions: Vec::new(),
             lighting: LightingConfig::default(),
         };
 
@@ -570,14 +543,6 @@ mod tests {
             features: vec![vec![CellFeatures::default()]],
             entry_point: (0, 0, Direction::North),
             encounter_table: "test".into(),
-            light_positions: vec![TorchData {
-                x: 0,
-                y: 0,
-                color: ColorRgb(1.0, 0.7, 0.3),
-                intensity: 6000.0,
-                range: 10.0,
-                shadows: true,
-            }],
             lighting: LightingConfig {
                 fog: FogConfig {
                     color: ColorRgb(0.10, 0.09, 0.08),
@@ -597,9 +562,8 @@ mod tests {
 
     #[test]
     fn dungeon_floor_omits_lighting_field_loads() {
-        // Verifies #[serde(default)] on light_positions + lighting: a RON snippet
-        // without those fields still parses (preserves backward compat with
-        // existing assets).
+        // Verifies #[serde(default)] on lighting: a RON snippet without it
+        // still parses (preserves backward compat with existing assets).
         let ron_str = r#"(
             name: "no lighting", width: 1, height: 1, floor_number: 1,
             walls: [[(north: Open, south: Open, east: Open, west: Open)]],
@@ -608,7 +572,6 @@ mod tests {
             encounter_table: "test",
         )"#;
         let parsed: DungeonFloor = ron::de::from_str(ron_str).expect("parse");
-        assert!(parsed.light_positions.is_empty());
         assert_eq!(parsed.lighting, LightingConfig::default());
     }
 

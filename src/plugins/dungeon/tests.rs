@@ -192,7 +192,6 @@ fn make_open_floor(w: u32, h: u32) -> DungeonFloor {
         features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
-        light_positions: Vec::new(),
         lighting: LightingConfig::default(),
     }
 }
@@ -449,7 +448,6 @@ fn handle_dungeon_input_drops_input_during_animation() {
             features: vec![vec![CellFeatures::default(); 5]; 5],
             entry_point: (2, 2, Direction::North),
             encounter_table: "test_table".into(),
-            light_positions: Vec::new(),
             lighting: LightingConfig::default(),
         };
         insert_test_floor(&mut app, floor);
@@ -572,7 +570,6 @@ fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
         features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
-        light_positions: Vec::new(),
         lighting: LightingConfig::default(),
     }
 }
@@ -666,9 +663,8 @@ fn on_exit_dungeon_despawns_all_dungeon_geometry() {
         "Ambient brightness should restore to default"
     );
 
-    // Feature #9: all Torch entities (cell + carried) must also be gone.
-    // make_walled_floor has no light_positions so only the carried torch existed;
-    // it's a grandchild of PlayerParty, despawned recursively.
+    // Feature #9: the carried torch (only Torch entity) must also be gone.
+    // It's a grandchild of PlayerParty, despawned recursively.
     let post_torch_count = app
         .world_mut()
         .query_filtered::<Entity, With<Torch>>()
@@ -676,7 +672,7 @@ fn on_exit_dungeon_despawns_all_dungeon_geometry() {
         .count();
     assert_eq!(
         post_torch_count, 0,
-        "All Torch entities (cell + carried) must be despawned on OnExit(Dungeon)"
+        "Carried torch must be despawned on OnExit(Dungeon)"
     );
 }
 
@@ -684,32 +680,10 @@ fn on_exit_dungeon_despawns_all_dungeon_geometry() {
 // Lighting tests (Feature #9)
 // -----------------------------------------------------------------------
 
-fn insert_test_floor_with_torches(
-    app: &mut App,
-    w: u32,
-    h: u32,
-    torches: Vec<crate::data::dungeon::TorchData>,
-) {
-    use crate::data::dungeon::{CellFeatures, LightingConfig, WallMask};
-    let floor = DungeonFloor {
-        name: "test_lit".into(),
-        width: w,
-        height: h,
-        floor_number: 1,
-        walls: vec![vec![WallMask::default(); w as usize]; h as usize],
-        features: vec![vec![CellFeatures::default(); w as usize]; h as usize],
-        entry_point: (1, 1, Direction::North),
-        encounter_table: "test".into(),
-        light_positions: torches,
-        lighting: LightingConfig::default(),
-    };
-    insert_test_floor(app, floor);
-}
-
 #[test]
 fn distance_fog_attached_to_dungeon_camera() {
     let mut app = make_test_app();
-    insert_test_floor_with_torches(&mut app, 3, 3, Vec::new());
+    insert_test_floor(&mut app, make_open_floor(3, 3));
     advance_into_dungeon(&mut app);
 
     // Query: a Camera3d marked DungeonCamera should also carry DistanceFog.
@@ -732,103 +706,6 @@ fn distance_fog_attached_to_dungeon_camera() {
     assert!(
         matches!(fog.falloff, FogFalloff::Exponential { .. }),
         "DistanceFog falloff must be Exponential — Linear default is invisible at dungeon scale"
-    );
-}
-
-#[test]
-fn torches_spawned_per_light_positions() {
-    use crate::data::dungeon::{ColorRgb, TorchData};
-    let torches = vec![
-        TorchData {
-            x: 0,
-            y: 0,
-            color: ColorRgb(1.0, 0.7, 0.3),
-            intensity: 6000.0,
-            range: 10.0,
-            shadows: true,
-        },
-        TorchData {
-            x: 2,
-            y: 2,
-            color: ColorRgb(0.6, 0.4, 1.0),
-            intensity: 4000.0,
-            range: 8.0,
-            shadows: false,
-        },
-    ];
-    let mut app = make_test_app();
-    insert_test_floor_with_torches(&mut app, 3, 3, torches);
-    advance_into_dungeon(&mut app);
-
-    // Cell torches: tagged Torch + DungeonGeometry, NOT a child of PlayerParty.
-    // Carried torch: tagged Torch but is a grandchild of PlayerParty (no DungeonGeometry).
-    // Filter on (Torch, DungeonGeometry) to count just the cell torches.
-    let cell_count = app
-        .world_mut()
-        .query_filtered::<Entity, (With<Torch>, With<DungeonGeometry>)>()
-        .iter(app.world())
-        .count();
-    assert_eq!(
-        cell_count, 2,
-        "two cell torches authored, two cell-torch entities expected"
-    );
-
-    // All Torch entities (cell + carried): 2 + 1 = 3.
-    let all_torches = app
-        .world_mut()
-        .query_filtered::<Entity, With<Torch>>()
-        .iter(app.world())
-        .count();
-    assert_eq!(
-        all_torches, 3,
-        "two cell torches + one carried torch = three Torch entities"
-    );
-}
-
-#[test]
-fn flicker_modulates_intensity_over_time() {
-    use crate::data::dungeon::{ColorRgb, TorchData};
-
-    let torches = vec![TorchData {
-        x: 0,
-        y: 0,
-        color: ColorRgb(1.0, 0.7, 0.3),
-        intensity: 1000.0,
-        range: 5.0,
-        shadows: false,
-    }];
-    let mut app = make_test_app();
-    insert_test_floor_with_torches(&mut app, 3, 3, torches);
-    // Deterministic time: each app.update() advances 100ms (Pitfall §Pitfall 7).
-    app.world_mut()
-        .insert_resource(TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(100),
-        ));
-    advance_into_dungeon(&mut app);
-
-    // Run a handful of frames so flicker accumulates non-trivial t.
-    for _ in 0..5 {
-        app.update();
-    }
-
-    // Find the cell torch (Torch + DungeonGeometry, NOT the carried torch).
-    let intensity = app
-        .world_mut()
-        .query_filtered::<&PointLight, (With<Torch>, With<DungeonGeometry>)>()
-        .single(app.world())
-        .unwrap()
-        .intensity;
-    // Intensity must have moved off the spawn-time 1000.0 (flicker is non-zero).
-    assert!(
-        (intensity - 1000.0).abs() > 1.0,
-        "flicker should have moved intensity away from base; got {}",
-        intensity
-    );
-    // Intensity must stay within the [0.80, 1.20] clamp band.
-    assert!(
-        (800.0..=1200.0).contains(&intensity),
-        "flicker intensity outside clamp band: {}",
-        intensity
     );
 }
 

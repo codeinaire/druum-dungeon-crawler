@@ -16,7 +16,7 @@ pub mod spells;
 pub use classes::ClassTable;
 pub use dungeon::{
     CellFeatures, ColorRgb, Direction, DungeonFloor, FogConfig, LightingConfig, TeleportTarget,
-    TorchData, TrapType, WallMask, WallType,
+    TrapType, WallMask, WallType,
 };
 pub use enemies::EnemyDb;
 pub use items::ItemDb;

@@ -1,7 +1,6 @@
 //! App-level integration test for Feature #8: 3D Dungeon Renderer.
-//! Updated in Feature #9 to account for 4 cell torches from floor_01.light_positions.
 //!
-//! Verifies that `spawn_dungeon_geometry` correctly spawns 124 entities tagged
+//! Verifies that `spawn_dungeon_geometry` correctly spawns 120 entities tagged
 //! with `DungeonGeometry` when `GameState::Dungeon` is entered with a loaded
 //! `floor_01`. The math:
 //!   - 36 floor tiles (one per cell, 6×6 grid)
@@ -11,10 +10,8 @@
 //!       * 22 west walls renderable (outer left column + interior doors/special walls)
 //!       *  6 south walls (bottom row y=5, all Solid — outer edge)
 //!       *  6 east walls (right column x=5, all Solid — outer edge)
-//!   - 4 cell torches from `floor.light_positions` (Feature #9):
-//!       * 4 torches authored in floor_01.dungeon.ron (1 entry + 1 east + 1 mage-blue + 1 trap)
 //!
-//!   Total: 36 + 36 + 48 + 4 = 124.
+//!   Total: 36 + 36 + 48 = 120.
 //!
 //! Note: the player PointLight (carried torch) is a child of DungeonCamera
 //! (NOT tagged DungeonGeometry — cleaned via PlayerParty parent), so it does
@@ -135,12 +132,11 @@ fn setup_dungeon_assets_and_enter(
     next_game_state.set(GameState::Dungeon);
 }
 
-/// Run-once Update system: count `DungeonGeometry` entities, assert == 124,
+/// Run-once Update system: count `DungeonGeometry` entities, assert == 120,
 /// then write `AppExit::Success`.
 ///
 /// Count breakdown for floor_01 (6×6 grid):
-///   36 floor tiles + 36 ceiling tiles + 48 wall plates + 4 torches = 124.
-/// The 4 torches come from floor_01.light_positions (Feature #9).
+///   36 floor tiles + 36 ceiling tiles + 48 wall plates = 120.
 /// The player PointLight (carried torch) is a child of DungeonCamera
 /// (NOT tagged DungeonGeometry — cleaned via PlayerParty parent).
 fn assert_dungeon_geometry_count(
@@ -155,12 +151,10 @@ fn assert_dungeon_geometry_count(
 
     let count = query.iter().count();
     assert_eq!(
-        count, 124,
-        "Geometry entity count for floor_01 must equal 36 floor + 36 ceiling + 48 walls \
-         + 4 torches (Feature #9 light_positions) = 124. \
+        count, 120,
+        "Geometry entity count for floor_01 must equal 36 floor + 36 ceiling + 48 walls = 120. \
          If this assertion fails after an asset edit, recount per the canonical iteration rule \
-         (north + west of every cell, plus south of bottom row, plus east of right column) \
-         AND verify floor_01.light_positions.len()."
+         (north + west of every cell, plus south of bottom row, plus east of right column)."
     );
 
     exit.write(AppExit::Success);
