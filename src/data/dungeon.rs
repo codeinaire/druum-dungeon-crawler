@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// **y-down convention:** `North = (0, -1)`. This matches the RON row layout
 /// (`walls[0]` = top of the file = top of the screen = "north") and the
 /// auto-map screen origin. Bevy's world coordinates are y-UP; the conversion
-/// (`world_z = -grid_y * cell_size`) lives in Feature #8's renderer.
+/// (`world_z = +grid_y * cell_size`) lives in Feature #8's renderer.
 ///
 /// Offsets:
 /// - `North = (0, -1)` — decreasing y
