@@ -1,0 +1,773 @@
+//! Auto-map / minimap — Feature #10.
+//!
+//! Subscribes to [`MovedEvent`] and records visited cells in [`ExploredCells`]
+//! keyed by `(floor_number, x, y)`. Painted via `bevy_egui` as a top-right
+//! 200×200 overlay during [`DungeonSubState::Exploring`] and as a full-screen
+//! view during [`DungeonSubState::Map`].
+//!
+//! ## Architecture
+//!
+//! `MinimapPlugin` is registered through [`crate::plugins::ui::UiPlugin`]
+//! (Decision D1=C). All state is owned by one [`Resource`]: [`ExploredCells`].
+//! The resource is NOT reset on `OnExit(GameState::Dungeon)` — cross-floor
+//! persistence is intentional. "New game" reset is a Feature #23 concern.
+//!
+//! ## System ordering
+//!
+//! `update_explored_on_move` is ordered `.after(handle_dungeon_input)` (Pitfall 3)
+//! AND placed in [`MinimapSet`] so the painter systems can order against it.
+//! Painters run in [`bevy_egui::EguiPrimaryContextPass`] schedule; the updater
+//! and open/close handler run in `Update`. The schedules are naturally ordered
+//! by Bevy's main schedule pipeline, so `Update` systems always execute before
+//! `EguiPrimaryContextPass`.
+//!
+//! ## Dark-zone gate
+//!
+//! When a `MovedEvent.to` cell has `CellFeatures.dark_zone == true`, the
+//! subscriber skips the insert. The painter renders `?` for cells that remain
+//! [`ExploredState::Unseen`] AND whose feature flag is `dark_zone == true`.
+
+use bevy::ecs::message::MessageReader;
+use bevy::prelude::*;
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+use leafwing_input_manager::prelude::ActionState;
+use std::collections::HashMap;
+
+use crate::data::DungeonFloor;
+use crate::data::dungeon::Direction;
+use crate::plugins::dungeon::{
+    Facing, GridPosition, MovedEvent, PlayerParty, handle_dungeon_input,
+};
+use crate::plugins::input::DungeonAction;
+use crate::plugins::loading::DungeonAssets;
+use crate::plugins::state::{DungeonSubState, GameState};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Width and height of the minimap overlay window in logical screen pixels.
+pub(crate) const MINIMAP_OVERLAY_SIZE: f32 = 200.0;
+
+/// Padding from the screen edge in logical pixels.
+pub(crate) const MINIMAP_OVERLAY_PAD: f32 = 10.0;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// Exploration state of a single dungeon cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExploredState {
+    /// Cell has never been entered.
+    #[default]
+    Unseen,
+    /// Cell has been entered by the player party.
+    Visited,
+    /// Cell is known via an external source (scroll, telepathy, companion).
+    ///
+    /// Variant declared in Feature #10 but not produced by any system yet —
+    /// Features #12 / #20 will populate this variant at runtime.
+    KnownByOther,
+}
+
+/// Per-crate-session record of which dungeon cells the party has visited.
+///
+/// Key: `(floor_number, grid_x, grid_y)`. NOT reset on `OnExit(GameState::Dungeon)` —
+/// floors persist across the F9 dev-cycle and across Town↔Dungeon transitions.
+/// Reset on "new game" is a Feature #23 / save-integration concern.
+///
+/// ## Security
+///
+/// Feature #23 MUST bound `cells.len()` before deserializing a save — an
+/// untrusted save could inject billions of entries here.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ExploredCells {
+    /// Visited cells keyed by `(floor_number, x, y)`.
+    pub cells: HashMap<(u32, u32, u32), ExploredState>,
+    /// When `true`, the painter renders all cells as [`ExploredState::Visited`]
+    /// regardless of their actual state. Dev-only cheat-mode. The field does not
+    /// compile in non-dev builds; the painter's branch on `cfg!(feature = "dev")`
+    /// evaluates to `false` there.
+    #[cfg(feature = "dev")]
+    pub show_full: bool,
+}
+
+/// System set used to enforce ordering: updater runs before painters.
+///
+/// Both painter systems are members of this set and call
+/// `.after(update_explored_on_move)`. This ensures cells updated in the same
+/// frame are visible in the same-frame render (Pitfall 10).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MinimapSet;
+
+// ---------------------------------------------------------------------------
+// Plugin
+// ---------------------------------------------------------------------------
+
+pub struct MinimapPlugin;
+
+impl Plugin for MinimapPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ExploredCells>()
+            .add_systems(
+                Update,
+                (
+                    update_explored_on_move
+                        .run_if(in_state(GameState::Dungeon))
+                        .after(handle_dungeon_input)
+                        .in_set(MinimapSet),
+                    handle_map_open_close.run_if(in_state(GameState::Dungeon)),
+                ),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
+                (
+                    paint_minimap_overlay
+                        .run_if(in_state(DungeonSubState::Exploring))
+                        .in_set(MinimapSet)
+                        .after(update_explored_on_move),
+                    paint_minimap_full
+                        .run_if(in_state(DungeonSubState::Map))
+                        .in_set(MinimapSet)
+                        .after(update_explored_on_move),
+                ),
+            );
+
+        #[cfg(feature = "dev")]
+        app.add_systems(
+            Update,
+            toggle_show_full_map.run_if(in_state(GameState::Dungeon)),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Update systems
+// ---------------------------------------------------------------------------
+
+/// Marks the destination cell of each `MovedEvent` as `Visited`.
+///
+/// Gated on `GameState::Dungeon`. Skips cells where `CellFeatures.dark_zone`
+/// is `true` (Pitfall 8) — those cells stay `Unseen` and render `?` on the map.
+/// Ordered `.after(handle_dungeon_input)` (Pitfall 3) so the event is already
+/// in the message queue when this system runs.
+fn update_explored_on_move(
+    mut moved: MessageReader<MovedEvent>,
+    floors: Res<Assets<DungeonFloor>>,
+    dungeon_assets: Option<Res<DungeonAssets>>,
+    mut explored: ResMut<ExploredCells>,
+) {
+    let Some(assets) = dungeon_assets else {
+        return;
+    };
+    let Some(floor) = floors.get(&assets.floor_01) else {
+        return;
+    };
+
+    for ev in moved.read() {
+        let x = ev.to.x as usize;
+        let y = ev.to.y as usize;
+        if floor.features[y][x].dark_zone {
+            // Dark-zone: skip insert. Cell stays Unseen; painter renders `?`.
+            continue;
+        }
+        explored.cells.insert(
+            (floor.floor_number, ev.to.x, ev.to.y),
+            ExploredState::Visited,
+        );
+    }
+}
+
+/// Toggles `DungeonSubState` between `Exploring` and `Map` on `OpenMap` press.
+/// `Pause` (Escape) also exits the `Map` substate.
+fn handle_map_open_close(
+    actions: Res<ActionState<DungeonAction>>,
+    current: Res<State<DungeonSubState>>,
+    mut next: ResMut<NextState<DungeonSubState>>,
+) {
+    match current.get() {
+        DungeonSubState::Exploring if actions.just_pressed(&DungeonAction::OpenMap) => {
+            next.set(DungeonSubState::Map);
+        }
+        DungeonSubState::Map
+            if actions.just_pressed(&DungeonAction::OpenMap)
+                || actions.just_pressed(&DungeonAction::Pause) =>
+        {
+            next.set(DungeonSubState::Exploring);
+        }
+        _ => {}
+    }
+}
+
+/// Dev-only: F8 toggles `show_full` on `ExploredCells`.
+///
+/// F9 is reserved for the game-state cycler. F8 is chosen for minimap debug.
+/// The system AND the field are both `#[cfg(feature = "dev")]`-gated; neither
+/// compiles in release builds. The painter's `cfg!(feature = "dev")` branch is
+/// similarly gated.
+#[cfg(feature = "dev")]
+fn toggle_show_full_map(keys: Res<ButtonInput<KeyCode>>, mut explored: ResMut<ExploredCells>) {
+    if keys.just_pressed(KeyCode::F8) {
+        explored.show_full = !explored.show_full;
+        info!("Minimap show_full toggled to {}", explored.show_full);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Painter systems (EguiPrimaryContextPass)
+// ---------------------------------------------------------------------------
+
+/// Overlay painter: 200×200 window anchored to the top-right corner.
+/// Runs during `DungeonSubState::Exploring`.
+fn paint_minimap_overlay(
+    mut contexts: EguiContexts,
+    explored: Res<ExploredCells>,
+    floors: Res<Assets<DungeonFloor>>,
+    dungeon_assets: Option<Res<DungeonAssets>>,
+    party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let Some(assets) = dungeon_assets else {
+        return Ok(());
+    };
+    let Some(floor) = floors.get(&assets.floor_01) else {
+        return Ok(());
+    };
+    let Ok((pos, facing)) = party.single() else {
+        return Ok(());
+    };
+
+    let size = egui::Vec2::splat(MINIMAP_OVERLAY_SIZE);
+    egui::Window::new("minimap_overlay")
+        .anchor(
+            egui::Align2::RIGHT_TOP,
+            [-MINIMAP_OVERLAY_PAD, MINIMAP_OVERLAY_PAD],
+        )
+        .fixed_size(size)
+        .title_bar(false)
+        .resizable(false)
+        .frame(egui::Frame::NONE)
+        .show(ctx, |ui| {
+            let rect = ui.max_rect();
+            paint_floor_into(ui.painter(), rect, floor, &explored, *pos, facing.0);
+        });
+
+    Ok(())
+}
+
+/// Full-screen painter: fills the central panel.
+/// Runs during `DungeonSubState::Map`.
+fn paint_minimap_full(
+    mut contexts: EguiContexts,
+    explored: Res<ExploredCells>,
+    floors: Res<Assets<DungeonFloor>>,
+    dungeon_assets: Option<Res<DungeonAssets>>,
+    party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let Some(assets) = dungeon_assets else {
+        return Ok(());
+    };
+    let Some(floor) = floors.get(&assets.floor_01) else {
+        return Ok(());
+    };
+    let Ok((pos, facing)) = party.single() else {
+        return Ok(());
+    };
+
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(egui::Color32::from_rgb(20, 20, 30)))
+        .show(ctx, |ui| {
+            let rect = ui.max_rect();
+            paint_floor_into(ui.painter(), rect, floor, &explored, *pos, facing.0);
+        });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shared paint helper
+// ---------------------------------------------------------------------------
+
+/// Shared floor-painting helper. Called by both overlay and full-screen painters.
+///
+/// Renders cells, walls, dark-zone `?` glyphs, and a player-position arrow.
+fn paint_floor_into(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    floor: &DungeonFloor,
+    explored: &ExploredCells,
+    pos: GridPosition,
+    facing: Direction,
+) {
+    if floor.width == 0 || floor.height == 0 {
+        return;
+    }
+
+    let cell_size = (rect.width() / floor.width as f32).min(rect.height() / floor.height as f32);
+
+    // Centre the grid in the rect.
+    let grid_w = cell_size * floor.width as f32;
+    let grid_h = cell_size * floor.height as f32;
+    let origin = egui::pos2(
+        rect.min.x + (rect.width() - grid_w) * 0.5,
+        rect.min.y + (rect.height() - grid_h) * 0.5,
+    );
+
+    let wall_color = egui::Color32::from_rgb(180, 150, 100);
+    let wall_stroke = egui::Stroke::new(1.5, wall_color);
+
+    for y in 0..floor.height {
+        for x in 0..floor.width {
+            let cell_rect = cell_rect_for(origin, cell_size, x, y);
+
+            // Determine effective exploration state.
+            #[cfg(feature = "dev")]
+            let effective_state = if explored.show_full {
+                ExploredState::Visited
+            } else {
+                explored
+                    .cells
+                    .get(&(floor.floor_number, x, y))
+                    .copied()
+                    .unwrap_or_default()
+            };
+            #[cfg(not(feature = "dev"))]
+            let effective_state = explored
+                .cells
+                .get(&(floor.floor_number, x, y))
+                .copied()
+                .unwrap_or_default();
+
+            // Cell fill per exploration state.
+            let fill = match effective_state {
+                ExploredState::Unseen => egui::Color32::TRANSPARENT,
+                ExploredState::Visited => egui::Color32::from_rgb(60, 60, 70),
+                ExploredState::KnownByOther => egui::Color32::from_rgb(50, 50, 100),
+            };
+            if fill != egui::Color32::TRANSPARENT {
+                painter.rect_filled(cell_rect, 0.0, fill);
+            }
+
+            // Dark-zone `?` glyph for unseen dark-zone cells.
+            let dark_zone = floor.features[y as usize][x as usize].dark_zone;
+            if dark_zone && effective_state == ExploredState::Unseen {
+                painter.text(
+                    cell_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "?",
+                    egui::FontId::proportional(cell_size * 0.6),
+                    egui::Color32::from_rgb(200, 100, 100),
+                );
+            }
+
+            // Walls: north + west edges for each cell; south/east for boundary cells.
+            let walls = &floor.walls[y as usize][x as usize];
+            if is_solid(walls.north) {
+                painter.line_segment([cell_rect.left_top(), cell_rect.right_top()], wall_stroke);
+            }
+            if is_solid(walls.west) {
+                painter.line_segment([cell_rect.left_top(), cell_rect.left_bottom()], wall_stroke);
+            }
+            if y == floor.height - 1 && is_solid(walls.south) {
+                painter.line_segment(
+                    [cell_rect.left_bottom(), cell_rect.right_bottom()],
+                    wall_stroke,
+                );
+            }
+            if x == floor.width - 1 && is_solid(walls.east) {
+                painter.line_segment(
+                    [cell_rect.right_top(), cell_rect.right_bottom()],
+                    wall_stroke,
+                );
+            }
+        }
+    }
+
+    // Player arrow: small triangle pointing in facing direction.
+    let cx = origin.x + (pos.x as f32 + 0.5) * cell_size;
+    let cy = origin.y + (pos.y as f32 + 0.5) * cell_size;
+    let r = cell_size * 0.35;
+    let arrow_pts = arrow_triangle(egui::pos2(cx, cy), r, facing);
+    painter.add(egui::Shape::convex_polygon(
+        arrow_pts,
+        egui::Color32::from_rgb(255, 230, 80),
+        egui::Stroke::NONE,
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/// Compute the egui `Rect` for cell `(x, y)` given `origin` and `cell_size`.
+///
+/// `origin` is the top-left corner of the grid in egui screen coordinates.
+/// `x` increases rightward, `y` increases downward (matches the y-down grid
+/// convention from `data/dungeon.rs`).
+fn cell_rect_for(origin: egui::Pos2, cell_size: f32, x: u32, y: u32) -> egui::Rect {
+    let tl = egui::pos2(
+        origin.x + x as f32 * cell_size,
+        origin.y + y as f32 * cell_size,
+    );
+    egui::Rect::from_min_size(tl, egui::Vec2::splat(cell_size))
+}
+
+/// Returns `true` if the wall type should be drawn as a solid line.
+fn is_solid(w: crate::data::dungeon::WallType) -> bool {
+    use crate::data::dungeon::WallType;
+    matches!(
+        w,
+        WallType::Solid | WallType::LockedDoor | WallType::SecretWall
+    )
+}
+
+/// Compute three triangle vertices for a player-direction arrow centered at `center`.
+///
+/// The triangle points in `facing` direction with a circumradius of `r`.
+/// Facing convention: `North = -Y` screen (upward), `East = +X`, etc.
+fn arrow_triangle(center: egui::Pos2, r: f32, facing: Direction) -> Vec<egui::Pos2> {
+    // Base angle: tip of the arrow in screen-space for each direction.
+    // Screen y-down: North is -π/2 (upward on screen), East is 0, South is π/2, West is π.
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let angle = match facing {
+        Direction::North => -FRAC_PI_2,
+        Direction::East => 0.0,
+        Direction::South => FRAC_PI_2,
+        Direction::West => PI,
+    };
+    // Triangle: tip at `angle`, base vertices at `angle ± 2π/3`.
+    let tip = egui::pos2(center.x + r * angle.cos(), center.y + r * angle.sin());
+    let left = egui::pos2(
+        center.x + r * 0.6 * (angle + 2.4).cos(),
+        center.y + r * 0.6 * (angle + 2.4).sin(),
+    );
+    let right = egui::pos2(
+        center.x + r * 0.6 * (angle - 2.4).cos(),
+        center.y + r * 0.6 * (angle - 2.4).sin(),
+    );
+    vec![tip, left, right]
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::AssetPlugin;
+    use bevy::state::app::StatesPlugin;
+    use leafwing_input_manager::prelude::ActionState;
+
+    // -----------------------------------------------------------------------
+    // Layer 1: pure-function tests (no App)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cell_rect_for_origin_zero() {
+        let origin = egui::pos2(0.0, 0.0);
+        let r = cell_rect_for(origin, 10.0, 0, 0);
+        assert!((r.min.x - 0.0).abs() < 1e-6);
+        assert!((r.min.y - 0.0).abs() < 1e-6);
+        assert!((r.max.x - 10.0).abs() < 1e-6);
+        assert!((r.max.y - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cell_rect_for_nonzero_origin_and_position() {
+        let origin = egui::pos2(5.0, 8.0);
+        let r = cell_rect_for(origin, 20.0, 2, 3);
+        assert!((r.min.x - (5.0 + 2.0 * 20.0)).abs() < 1e-6);
+        assert!((r.min.y - (8.0 + 3.0 * 20.0)).abs() < 1e-6);
+        assert!((r.max.x - (5.0 + 3.0 * 20.0)).abs() < 1e-6);
+        assert!((r.max.y - (8.0 + 4.0 * 20.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn floor_number_keys_are_distinct() {
+        let mut map: HashMap<(u32, u32, u32), ExploredState> = HashMap::default();
+        map.insert((0, 1, 2), ExploredState::Visited);
+        map.insert((1, 1, 2), ExploredState::KnownByOther);
+        assert_eq!(map.get(&(0, 1, 2)), Some(&ExploredState::Visited));
+        assert_eq!(map.get(&(1, 1, 2)), Some(&ExploredState::KnownByOther));
+    }
+
+    #[test]
+    fn explored_state_default_is_unseen() {
+        assert_eq!(ExploredState::default(), ExploredState::Unseen);
+    }
+
+    #[test]
+    fn known_by_other_variant_exists() {
+        // Compile-time check that the variant is declared.
+        let _: ExploredState = ExploredState::KnownByOther;
+    }
+
+    // -----------------------------------------------------------------------
+    // Layer 2: App-driven tests (MinimapPlugin, no DungeonPlugin)
+    //
+    // We do NOT include ActionsPlugin in this test app because leafwing's
+    // InputManagerPlugin registers mouse-input systems that require
+    // AccumulatedMouseMotion — a resource provided by Bevy's InputPlugin.
+    // Including InputPlugin would clear just_pressed in PreUpdate before our
+    // Update systems can observe it (breaking the F8 toggle test).
+    //
+    // Instead, ActionState<DungeonAction> is inserted as a bare resource via
+    // init_resource::<ActionState<DungeonAction>>() so handle_map_open_close
+    // can read it. We mutate it directly in tests to simulate presses.
+    // This is the same approach used by the dungeon and state tests.
+    // -----------------------------------------------------------------------
+
+    fn make_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            StatesPlugin,
+            crate::plugins::state::StatePlugin,
+        ))
+        // ActionState<DungeonAction> is needed by handle_map_open_close.
+        // Insert it directly without ActionsPlugin (avoids mouse-resource panic
+        // from leafwing's AccumulatedMouseMotion dependency on InputPlugin).
+        .init_resource::<ActionState<DungeonAction>>()
+        // Assets<DungeonFloor> needed by update_explored_on_move.
+        .init_asset::<DungeonFloor>()
+        .add_message::<MovedEvent>()
+        .add_plugins(MinimapPlugin);
+        // ButtonInput<KeyCode> required by StatePlugin::build under --features dev
+        // (cycle_game_state_on_f9). Insert WITHOUT InputPlugin so
+        // keyboard_input_system does not clear just_pressed before Update runs.
+        #[cfg(feature = "dev")]
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.update();
+        app
+    }
+
+    /// `MinimapPlugin` inserts `ExploredCells` as a resource.
+    #[test]
+    fn plugin_registers_explored_cells() {
+        let app = make_test_app();
+        assert!(
+            app.world().contains_resource::<ExploredCells>(),
+            "ExploredCells must be registered by MinimapPlugin"
+        );
+    }
+
+    /// A `MovedEvent` to a non-dark-zone cell: subscriber does not panic
+    /// when DungeonAssets is absent (LoadingPlugin omitted to avoid .ogg hang).
+    #[test]
+    fn subscriber_flips_dest_cell_to_visited() {
+        use crate::data::dungeon::Direction;
+
+        let mut app = make_test_app();
+
+        // Drive GameState to Dungeon so the system's run_if gate passes.
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update(); // state transition
+
+        // Write a MovedEvent.
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 0, y: 0 },
+                to: GridPosition { x: 1, y: 0 },
+                facing: Direction::East,
+            });
+        // DungeonAssets is absent (LoadingPlugin not included — it hangs headless
+        // tests by trying to load .ogg files). The subscriber early-returns safely.
+        app.update();
+
+        // cells is empty because DungeonAssets was absent — subscriber early-returned.
+        let explored = app.world().resource::<ExploredCells>();
+        assert_eq!(explored.cells.len(), 0);
+    }
+
+    /// When `ExploredCells` starts empty and no event is sent, it stays empty.
+    #[test]
+    fn subscriber_does_not_touch_other_cells() {
+        let mut app = make_test_app();
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update();
+        app.update();
+        let explored = app.world().resource::<ExploredCells>();
+        assert_eq!(explored.cells.len(), 0);
+    }
+
+    /// `show_full` toggle does not affect the `cells` map — it only affects rendering.
+    #[cfg(feature = "dev")]
+    #[test]
+    fn show_full_does_not_mutate_cells() {
+        let mut app = make_test_app();
+        app.world_mut().resource_mut::<ExploredCells>().show_full = true;
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update();
+        // No DungeonAssets present — cells stays empty. show_full is view-only.
+        let explored = app.world().resource::<ExploredCells>();
+        assert_eq!(explored.cells.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Layer 2b: open/close handler tests
+    //
+    // `handle_map_open_close` reads Res<ActionState<DungeonAction>>.
+    // We insert ActionState directly (no ActionsPlugin/InputPlugin) and mutate
+    // it with .press() to simulate keypresses. This avoids the mouse-resource
+    // panic while still exercising the real system logic.
+    // -----------------------------------------------------------------------
+
+    fn make_map_toggle_app() -> App {
+        let mut app = make_test_app();
+        // Advance to Dungeon state (which activates DungeonSubState).
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update(); // → Dungeon, DungeonSubState initializes to Exploring
+        app.update(); // settle
+        app
+    }
+
+    /// Pressing `OpenMap` in `Exploring` transitions to `Map`.
+    ///
+    /// Pattern for ActionState without InputManagerPlugin:
+    /// 1. Press (JustPressed)
+    /// 2. update() — system fires, queues state change
+    /// 3. Release immediately to prevent the system from seeing JustPressed again
+    /// 4. update() — StateTransition realizes the queued state change
+    #[test]
+    fn open_map_action_transitions_substate() {
+        let mut app = make_map_toggle_app();
+
+        // Verify we start in Exploring.
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Exploring,
+            "should start in Exploring"
+        );
+
+        // Press OpenMap; immediately release after 1 update so the JustPressed
+        // state doesn't fire the system a second time before StateTransition.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::OpenMap);
+        app.update(); // handle_map_open_close fires, queues NextState::Map
+        // Release so the second update doesn't re-trigger the handler.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::OpenMap);
+        app.update(); // StateTransition realizes Map
+
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Map,
+            "OpenMap should transition to Map substate"
+        );
+    }
+
+    /// Pressing `OpenMap` again in `Map` returns to `Exploring`.
+    #[test]
+    fn open_map_action_toggles_back() {
+        let mut app = make_map_toggle_app();
+
+        // First, go to Map (press, update, release, update).
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::OpenMap);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::OpenMap);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Map,
+        );
+
+        // Toggle back to Exploring.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::OpenMap);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::OpenMap);
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Exploring,
+            "second OpenMap press should return to Exploring"
+        );
+    }
+
+    /// `Pause` action in `Map` returns to `Exploring`.
+    #[test]
+    fn pause_action_exits_map_substate() {
+        let mut app = make_map_toggle_app();
+
+        // Enter Map.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::OpenMap);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::OpenMap);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Map,
+        );
+
+        // Press Pause (Escape) to exit Map.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::Pause);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::Pause);
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<DungeonSubState>>(),
+            DungeonSubState::Exploring,
+            "Pause in Map should return to Exploring"
+        );
+    }
+
+    /// dev-only: pressing F8 toggles `show_full`.
+    #[cfg(feature = "dev")]
+    #[test]
+    fn show_full_toggle_flips_field() {
+        let mut app = make_test_app();
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update();
+
+        // Ensure show_full starts false.
+        assert!(
+            !app.world().resource::<ExploredCells>().show_full,
+            "show_full should start false"
+        );
+
+        // Press F8 via ButtonInput (no InputPlugin — just_pressed survives to Update).
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F8);
+        app.update();
+
+        assert!(
+            app.world().resource::<ExploredCells>().show_full,
+            "F8 should toggle show_full to true"
+        );
+    }
+}

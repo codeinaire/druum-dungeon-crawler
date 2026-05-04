@@ -606,8 +606,16 @@ fn spawn_dungeon_geometry(
 /// immediately, not after the tween completes.
 ///
 /// Tolerant of missing `DungeonAssets` / unloaded `DungeonFloor`.
+///
+/// **Visibility is `pub(crate)`** so `MinimapPlugin::update_explored_on_move`
+/// can use `.after(handle_dungeon_input)` for system ordering (Feature #10
+/// Pitfall 3: minimap subscriber must run after input handler to guarantee
+/// `MovedEvent` is published before the subscriber reads it in the same frame).
+/// Do not make this `pub` (no external consumer needed) or `fn` (ordering
+/// coupling would silently break). If you remove `pub(crate)`, `minimap.rs`
+/// will produce a compile error on the `.after(...)` ordering call.
 #[allow(clippy::type_complexity)]
-fn handle_dungeon_input(
+pub(crate) fn handle_dungeon_input(
     mut commands: Commands,
     actions: Res<ActionState<DungeonAction>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
