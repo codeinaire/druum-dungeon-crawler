@@ -305,7 +305,7 @@ pub struct PartyMemberBundle {
 /// Per Decision 6: `spawn_default_debug_party` refuses to spawn the
 /// (n+1)th character. Feature #19 (character creation) may reduce this
 /// at game-start for specific scenarios; default is always 4.
-#[derive(Resource, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Resource, Reflect, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PartySize(pub usize);
 
 impl Default for PartySize {
