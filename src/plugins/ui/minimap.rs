@@ -29,14 +29,14 @@
 
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, PrimaryEguiContext, egui};
 use leafwing_input_manager::prelude::ActionState;
 use std::collections::HashMap;
 
 use crate::data::DungeonFloor;
 use crate::data::dungeon::Direction;
 use crate::plugins::dungeon::{
-    Facing, GridPosition, MovedEvent, PlayerParty, handle_dungeon_input,
+    DungeonCamera, Facing, GridPosition, MovedEvent, PlayerParty, handle_dungeon_input,
 };
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
@@ -113,6 +113,12 @@ impl Plugin for MinimapPlugin {
             .add_systems(
                 Update,
                 (
+                    // Idempotent (Without<PrimaryEguiContext> filter) — runs each
+                    // frame in Dungeon but is a no-op once attached. Cannot use
+                    // OnEnter because spawn_party_and_camera's Commands::spawn
+                    // is deferred — the Camera3d entity isn't queryable until
+                    // OnEnter's apply_deferred completes.
+                    attach_egui_to_dungeon_camera.run_if(in_state(GameState::Dungeon)),
                     update_explored_on_move
                         .run_if(in_state(GameState::Dungeon))
                         .after(handle_dungeon_input)
@@ -139,6 +145,33 @@ impl Plugin for MinimapPlugin {
             Update,
             toggle_show_full_map.run_if(in_state(GameState::Dungeon)),
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Camera setup
+// ---------------------------------------------------------------------------
+
+/// Attaches `PrimaryEguiContext` to the dungeon `Camera3d` so the minimap
+/// painters' `EguiContexts::ctx_mut()` resolves to a real context.
+///
+/// `UiPlugin` disables `bevy_egui`'s default auto-attach (which would otherwise
+/// permanently bind `PrimaryEguiContext` to the FIRST camera spawned — the
+/// loading-screen `Camera2d`, which is despawned before the dungeon Camera3d
+/// arrives, leaving every later camera without a context). Each plugin that
+/// needs egui therefore attaches the marker to its own camera.
+///
+/// Runs in `Update` (gated on `GameState::Dungeon`), not `OnEnter`, because
+/// `spawn_party_and_camera`'s `Commands::spawn` is deferred — the `Camera3d`
+/// entity isn't queryable until OnEnter's apply_deferred completes. The
+/// `Without<PrimaryEguiContext>` filter makes this a per-frame no-op once
+/// attached; F9 cycles re-attach the new camera on the next Update tick.
+fn attach_egui_to_dungeon_camera(
+    mut commands: Commands,
+    cameras: Query<Entity, (With<DungeonCamera>, Without<PrimaryEguiContext>)>,
+) {
+    for entity in &cameras {
+        commands.entity(entity).insert(PrimaryEguiContext);
     }
 }
 
@@ -218,8 +251,12 @@ fn toggle_show_full_map(keys: Res<ButtonInput<KeyCode>>, mut explored: ResMut<Ex
 // Painter systems (EguiPrimaryContextPass)
 // ---------------------------------------------------------------------------
 
-/// Overlay painter: 200×200 window anchored to the top-right corner.
+/// Overlay painter: 200×200 area anchored to the top-right corner.
 /// Runs during `DungeonSubState::Exploring`.
+///
+/// Uses `egui::Area` (not `Window`) — `Window` + `Frame::NONE` interacts
+/// poorly with auto-sizing and produces a zero-size content rect. `Area` is
+/// the correct egui primitive for an absolutely-positioned HUD overlay.
 fn paint_minimap_overlay(
     mut contexts: EguiContexts,
     explored: Res<ExploredCells>,
@@ -239,17 +276,19 @@ fn paint_minimap_overlay(
     };
 
     let size = egui::Vec2::splat(MINIMAP_OVERLAY_SIZE);
-    egui::Window::new("minimap_overlay")
+    egui::Area::new(egui::Id::new("minimap_overlay"))
         .anchor(
             egui::Align2::RIGHT_TOP,
             [-MINIMAP_OVERLAY_PAD, MINIMAP_OVERLAY_PAD],
         )
-        .fixed_size(size)
-        .title_bar(false)
-        .resizable(false)
-        .frame(egui::Frame::NONE)
         .show(ctx, |ui| {
-            let rect = ui.max_rect();
+            let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+            // Translucent dark background so the overlay reads against bright scenes.
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
             paint_floor_into(ui.painter(), rect, floor, &explored, *pos, facing.0);
         });
 
