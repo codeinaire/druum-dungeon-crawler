@@ -83,7 +83,9 @@ fn assert_class_table_shape(
     );
 
     // Mage — INT 14.
-    let mage = table.get(Class::Mage).expect("Mage should be in ClassTable");
+    let mage = table
+        .get(Class::Mage)
+        .expect("Mage should be in ClassTable");
     assert_eq!(
         mage.starting_stats.intelligence, 14,
         "Mage INT should be 14"
@@ -93,10 +95,7 @@ fn assert_class_table_shape(
     let priest = table
         .get(Class::Priest)
         .expect("Priest should be in ClassTable");
-    assert_eq!(
-        priest.starting_stats.piety, 14,
-        "Priest PIE should be 14"
-    );
+    assert_eq!(priest.starting_stats.piety, 14, "Priest PIE should be 14");
 
     // Thief — declared enum variant, NOT authored in core.classes.ron.
     assert!(

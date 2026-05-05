@@ -1,7 +1,7 @@
 # Plan: Party & Character ECS Model — Feature #11
 
 **Date:** 2026-05-04
-**Status:** Draft
+**Status:** Complete
 **Research:** ../research/20260504-160000-feature-11-party-character-ecs-model.md
 **Depends on:** 20260501-220000-feature-3-asset-pipeline-loading-flow.md, 20260501-230000-feature-4-dungeon-grid-data-model.md, 20260502-000000-feature-5-input-system-leafwing.md
 
@@ -453,40 +453,125 @@ All 8 Category C decisions resolved by user as "all A" (defaults) — see plan d
 
 ## Implementation Discoveries
 
-[Starts empty — populate during Step 0 with baseline test counts and during Steps 1-9 with unexpected findings, wrong assumptions, API quirks, edge cases, and fixes applied.]
+### Baseline test counts (Step 0)
 
-**BASELINE_LIB:** _____ (recorded in Step 0)
+The baseline was measured with the `10-auto-map-minimap` branch (Feature #10)
+also applied in GitButler's workspace. When that branch was unapplied (to
+allow single-stack commits on `ja-feature-11`), the effective main-only
+baseline became visible:
 
-**Pre-#11 `cargo test` total:** _____ lib + 3 integration
+**BASELINE_LIB (main-only, Feature #10 unapplied):** 67 lib tests (default), 68 (dev)
 
-**Pre-#11 `cargo test --features dev` total:** _____ lib + 3 integration
+**Post-#11 `cargo test` total (on ja-feature-11):** 78 lib + 4 integration
+(class_table_loads is the new 4th integration test)
+
+**Post-#11 `cargo test --features dev` total:** 79 lib + 4 integration
+
+The original Step 0 measurement (80 default / 83 dev) was taken with BOTH
+branches applied and reflects the minimap Feature #10 tests being present.
+Those tests are correct on their own branch; they are not in main yet and do
+not affect #11's baseline comparison.
+
+### Discovery 1: `Handle<T>` does NOT implement `Serialize + Deserialize` in Bevy 0.18
+
+**Impact: Material plan deviation.** The plan stated "Handle<ItemAsset>
+serializes cleanly as an asset path" (research §Architecture Options, Option
+A rationale). This is incorrect for Bevy 0.18 — `bevy::prelude::Handle<T>`
+has no `Serialize`/`Deserialize` impl in bevy_asset-0.18.1.
+
+**Fix applied:** `Equipment` cannot derive `Serialize + Deserialize`. It is
+the sole exception among the 12 components. The serde deviation is documented
+inline in `src/plugins/party/character.rs` with a note that Feature #23
+(save/load) must implement custom serde for `Equipment` (serializing each
+slot as `Option<AssetPath>` and re-resolving handles on load).
+
+All other 11 components (and `PartySize`) derive the full serde set as
+planned.
+
+### Discovery 2: `PartySize` missing `Reflect` derive
+
+The plan's derive set for `PartySize` listed `Resource, Serialize,
+Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash` — it omitted
+`Reflect`. `app.register_type::<PartySize>()` requires `GetTypeRegistration`
+which is provided by `#[derive(Reflect)]`. Fixed by adding `Reflect` to the
+derive set.
+
+### Discovery 3: GitButler multi-stack commit conflict
+
+When both `10-auto-map-minimap` and `ja-feature-11` were applied
+simultaneously, `but commit <branch>` failed with "Failed to merge bases
+while cherry picking." Resolved by unapplying `10-auto-map-minimap` before
+committing to `ja-feature-11`. This is a GitButler workspace mechanic —
+single-stack commits work cleanly; concurrent stacks require explicit branch
+selection. Feature #12 implementer should unapply #11's branch if it is still
+applied when starting work.
+
+### Discovery 4: GameState import scoping
+
+`GameState` is only needed inside the `#[cfg(feature = "dev")]` block in
+`PartyPlugin::build`. Placing `use crate::plugins::state::GameState;` at the
+file level triggers an "unused import" warning in default builds. Fix: placed
+the import inside the `#[cfg(feature = "dev")] { ... }` block. The plan did
+not specify this but the project convention (matching `state/mod.rs`) requires
+zero warnings in all feature combinations.
+
+### Discovery 5: Clippy and unused enum variants
+
+The five unauthored `Class` variants (Thief, Bishop, Samurai, Lord, Ninja)
+and four unauthored `Race` variants (Elf, Dwarf, Gnome, Hobbit) did NOT
+trigger `dead_code` or `clippy::enum_variant_names` warnings. The `Class`
+enum is used as a type in `ClassDef::id` (a public field serialized from
+RON), so Rust/clippy consider all variants reachable from external crate
+perspective. No `#[allow(...)]` was needed.
+
+### Discovery 6: `derive_stats` saturating arithmetic vs. plan pseudocode
+
+The research pseudocode (lines 220–282) used plain `+` and `*` without
+`saturating_*`. The implementation uses `saturating_add` and
+`saturating_mul` throughout as required by the plan §Critical ("saturating
+arithmetic for all arithmetic paths"). The `derive_stats_saturating_arithmetic`
+test verifies no panic with `u16::MAX` base stats + `u32::MAX` equipment.
+
+### Manual smoke test (Step 9) — DEFERRED to user
+
+The smoke test (Step 9) requires a graphical run of `cargo run --features dev`
+and F9 cycling into the Dungeon state. This cannot be performed headlessly.
+The user should:
+
+1. `cargo run --features dev`
+2. Press F9 to advance: TitleScreen → Town → Dungeon. Check stdout for
+   `Spawned 4 debug party members`.
+3. Press F9 again (Dungeon → Combat → ...) and back into Dungeon. Check
+   stdout for `Skipping debug party spawn: 4 party members already exist`.
+4. `cargo run` (default, no --features dev). Cycle to Dungeon via game flow.
+   Verify NO `Spawned` log appears.
 
 ## Verification
 
 After all 9 steps complete, run the full verification gate:
 
-- [ ] **Build (default):** `cargo check` — Automatic — zero warnings.
-- [ ] **Build (dev):** `cargo check --features dev` — Automatic — zero warnings.
-- [ ] **Lint (default):** `cargo clippy --all-targets -- -D warnings` — Automatic — zero warnings.
-- [ ] **Lint (dev):** `cargo clippy --all-targets --features dev -- -D warnings` — Automatic — zero warnings.
-- [ ] **Format:** `cargo fmt --check` — Automatic — exit 0.
-- [ ] **Test (default):** `cargo test` — Automatic — `BASELINE_LIB + 9` lib tests pass (8 in `character.rs::tests` + 2 in `classes.rs::tests` + 1 in `items.rs::tests` = ~11 new lib tests; allow ±1 if a test gets factored). 4 integration tests pass (existing 3 + new `class_table_loads`).
-- [ ] **Test (dev):** `cargo test --features dev` — Automatic — `BASELINE_LIB + 9` lib tests pass + 1 dev-only test (the existing `f9_advances_game_state` from Feature #2). 4 integration tests pass.
-- [ ] **`derive_stats` zero baseline:** `cargo test plugins::party::character::tests::derive_stats_returns_zero_for_zero_inputs` — Automatic — passes.
-- [ ] **`derive_stats` equipment additivity:** `cargo test plugins::party::character::tests::derive_stats_equipment_stacks_additively` — Automatic — passes.
-- [ ] **`derive_stats` Dead zeros pools:** `cargo test plugins::party::character::tests::derive_stats_dead_zeros_pools` — Automatic — passes.
-- [ ] **`derive_stats` Poison no-op at derive time:** `cargo test plugins::party::character::tests::derive_stats_poison_does_not_modify_stats_at_derive_time` — Automatic — passes.
-- [ ] **`derive_stats` saturating arithmetic:** `cargo test plugins::party::character::tests::derive_stats_saturating_arithmetic` — Automatic — no panic; `attack == u32::MAX`.
-- [ ] **`PartySize::default()` is 4:** `cargo test plugins::party::character::tests::party_size_default_is_four` — Automatic — passes.
-- [ ] **`StatusEffects::has` returns true for present kind:** `cargo test plugins::party::character::tests::status_effects_has_returns_true_for_present_kind` — Automatic — passes.
-- [ ] **`BaseStats` RON round-trip:** `cargo test plugins::party::character::tests::base_stats_round_trips_through_ron` — Automatic — passes.
-- [ ] **`ClassTable` RON round-trip:** `cargo test data::classes::tests::class_table_round_trips_through_ron` — Automatic — passes.
-- [ ] **`ClassTable::get` returns authored class:** `cargo test data::classes::tests::class_table_get_returns_authored_class` — Automatic — passes.
-- [ ] **`ItemStatBlock` RON round-trip:** `cargo test data::items::tests::item_stat_block_round_trips_through_ron` — Automatic — passes.
-- [ ] **`ClassTable` integration via `RonAssetPlugin`:** `cargo test --test class_table_loads` — Automatic — single test `class_table_loads_through_ron_asset_plugin` passes; asserts 3 classes loaded with the authored shapes.
-- [ ] **`Cargo.toml` byte-unchanged:** `git diff Cargo.toml` — Automatic — empty output.
-- [ ] **`Cargo.lock` byte-unchanged:** `git diff Cargo.lock` — Automatic — empty output.
-- [ ] **`src/main.rs` byte-unchanged:** `git diff src/main.rs` — Automatic — empty output.
-- [ ] **Files touched (final `git diff --stat`):** Manual — confirm ONLY these files changed: `src/plugins/party/mod.rs` (replaced), `src/plugins/party/character.rs` (new), `src/data/classes.rs` (replaced), `src/data/items.rs` (extended), `src/data/mod.rs` (re-exports added), `assets/classes/core.classes.ron` (replaced), `tests/class_table_loads.rs` (new), and `project/plans/20260504-170000-feature-11-party-character-ecs-model.md` (Implementation Discoveries). NO other files touched.
-- [ ] **Manual smoke (Step 9):** Manual — `cargo run --features dev`, F9 to Dungeon, verify spawn log appears once. F9 cycle out and back, verify idempotence-guard log appears (no second spawn). `cargo run` (default), verify spawn log does NOT appear.
-- [ ] **GitButler ship workflow:** Manual — `but status` shows the branch with the correct commits; `but push -u origin ja-feature-11-party-character-ecs-model`; `gh pr create --base main --title "feat: Party & Character ECS Model (Feature #11)" --body "<plan link + summary>"`. CI (if present) green.
+- [x] **Build (default):** `cargo check` — Automatic — zero warnings.
+- [x] **Build (dev):** `cargo check --features dev` — Automatic — zero warnings.
+- [x] **Lint (default):** `cargo clippy --all-targets -- -D warnings` — Automatic — zero warnings.
+- [x] **Lint (dev):** `cargo clippy --all-targets --features dev -- -D warnings` — Automatic — zero warnings.
+- [x] **Format:** `cargo fmt --check` — Automatic — exit 0.
+- [x] **Test (default):** `cargo test` — 78 lib tests pass + 4 integration tests (existing 3 + class_table_loads).
+- [x] **Test (dev):** `cargo test --features dev` — 79 lib tests pass + 4 integration tests.
+- [x] **`derive_stats` zero baseline:** passes.
+- [x] **`derive_stats` equipment additivity:** passes.
+- [x] **`derive_stats` Dead zeros pools:** passes.
+- [x] **`derive_stats` Poison no-op at derive time:** passes.
+- [x] **`derive_stats` saturating arithmetic:** passes — no panic; `attack == u32::MAX`.
+- [x] **`PartySize::default()` is 4:** passes.
+- [x] **`StatusEffects::has` returns true for present kind:** passes.
+- [x] **`BaseStats` RON round-trip:** passes.
+- [x] **`ClassTable` RON round-trip:** passes.
+- [x] **`ClassTable::get` returns authored class:** passes.
+- [x] **`ItemStatBlock` RON round-trip:** passes.
+- [x] **`ClassTable` integration via `RonAssetPlugin`:** passes — `class_table_loads_through_ron_asset_plugin` asserts 3 classes.
+- [x] **`Cargo.toml` byte-unchanged:** `git diff Cargo.toml` — empty output confirmed.
+- [x] **`Cargo.lock` byte-unchanged:** `git diff Cargo.lock` — empty output confirmed.
+- [x] **`src/main.rs` byte-unchanged:** `git diff src/main.rs` — empty output confirmed.
+- [x] **Files touched (feature-11 commits):** Confirmed — `src/plugins/party/mod.rs`, `src/plugins/party/character.rs` (new), `src/data/classes.rs`, `src/data/items.rs`, `src/data/mod.rs`, `assets/classes/core.classes.ron`, `tests/class_table_loads.rs`, `project/plans/...` (this file). The git diff --stat against origin/main also shows minimap-branch files as "removed" because that branch is unapplied from the workspace — those changes are NOT in any feature-11 commit.
+- [ ] **Manual smoke (Step 9):** Manual — deferred to user. See Implementation Discoveries §Manual smoke test.
+- [ ] **GitButler ship workflow:** Manual — `but push -u origin ja-feature-11-party-character-ecs-model`; `gh pr create`. CI green.
