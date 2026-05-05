@@ -6,11 +6,17 @@
 use bevy::prelude::*;
 
 pub mod character;
+pub mod inventory;
 
 pub use character::{
     ActiveEffect, BaseStats, CharacterName, Class, DerivedStats, Equipment, Experience,
     PartyMember, PartyMemberBundle, PartyRow, PartySize, PartySlot, Race, StatusEffectType,
     StatusEffects, derive_stats,
+};
+
+pub use inventory::{
+    EquipError, EquipResult, EquipSlot, EquipmentChangedEvent, Inventory, ItemInstance, ItemKind,
+    equip_item, give_item, recompute_derived_stats_on_equipment_change, unequip_item,
 };
 
 pub struct PartyPlugin;
@@ -36,6 +42,14 @@ impl Plugin for PartyPlugin {
             .register_type::<ActiveEffect>()
             .register_type::<StatusEffectType>()
             .register_type::<PartySize>();
+
+        // Feature #12 — inventory & equipment data layer. UI lives in #25.
+        app.add_message::<EquipmentChangedEvent>()
+            .register_type::<Inventory>()
+            .register_type::<ItemInstance>()
+            .register_type::<EquipSlot>()
+            .register_type::<ItemKind>()
+            .add_systems(Update, recompute_derived_stats_on_equipment_change);
 
         // Gate: feature = "dev" (NOT cfg(debug_assertions)).
         // Trigger: OnEnter(GameState::Dungeon) (NOT OnEnter(Loading)) — assets
@@ -82,14 +96,17 @@ fn spawn_default_debug_party(
 
     let count = debug_party_count(party_size.0);
     for (i, (name, class, row)) in roster.iter().enumerate().take(count) {
-        commands.spawn(PartyMemberBundle {
-            name: CharacterName((*name).into()),
-            class: *class,
-            race: Race::Human,
-            party_row: *row,
-            party_slot: PartySlot(i),
-            ..Default::default()
-        });
+        commands
+            .spawn(PartyMemberBundle {
+                name: CharacterName((*name).into()),
+                class: *class,
+                race: Race::Human,
+                party_row: *row,
+                party_slot: PartySlot(i),
+                ..Default::default()
+            })
+            // Feature #12: each party member carries its own bag (Wizardry-style).
+            .insert(Inventory::default());
     }
 
     info!("Spawned {} debug party members", count);
