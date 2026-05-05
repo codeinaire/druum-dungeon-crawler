@@ -1,7 +1,7 @@
 # Plan: Feature #12 — Inventory & Equipment
 
 **Date:** 2026-05-05
-**Status:** Draft
+**Status:** Complete
 **Research:** `project/research/20260505-080000-feature-12-inventory-equipment.md`
 **Roadmap:** `project/roadmaps/20260429-01-bevy-dungeon-crawler-roadmap.md` lines 638-684
 **Depends on:** Feature #11 (party / character ECS model — merged)
@@ -418,7 +418,55 @@ The double-check (caller-side AND asset-side) is intentional defense-in-depth: a
 
 ## Implementation Discoveries
 
-*(Empty at plan time. Populate during implementation with unexpected findings, wrong assumptions, API quirks, edge cases, and fixes applied. Mirror Features #9, #10, #11 — the implementer fills this in commit-by-commit.)*
+### D1 — `World::run_system_once` requires explicit `RunSystemOnce` trait import
+
+**File:** `src/plugins/party/inventory.rs` Layer-1 tests  
+**Finding:** In Bevy 0.18, `World::run_system_once` is not in the prelude. The trait must be imported explicitly: `use bevy::ecs::system::RunSystemOnce;`. The compiler suggests the path correctly in the error output.  
+**Fix applied:** Added the import to both `mod tests` and `mod app_tests` in `inventory.rs`.
+
+### D2 — `World::add_message` does not exist; use `MessageRegistry::register_message`
+
+**File:** `src/plugins/party/inventory.rs` Layer-1 tests  
+**Finding:** `add_message::<T>()` is an `App` method (delegating to `SubApp`), not a `World` method. For tests that use a raw `World` (without an `App`), the equivalent is `bevy::ecs::message::MessageRegistry::register_message::<T>(&mut world)`.  
+**Fix applied:** Layer-1 tests use `MessageRegistry::register_message::<EquipmentChangedEvent>(&mut world)` instead of `world.add_message()`.
+
+### D3 — `Entity::from_raw` removed in Bevy 0.18; use `Entity::PLACEHOLDER` or `world.spawn()`
+
+**File:** `src/plugins/party/inventory.rs` Layer-1 tests  
+**Finding:** `Entity::from_raw(n)` does not exist in Bevy 0.18. The available constructors are `Entity::PLACEHOLDER` (a sentinel), `Entity::from_raw_u32(index) -> Option<Entity>`, and `Entity::from_bits(bits: u64) -> Self`. For Layer-1 error-path tests where the entity need not exist in the world, `Entity::PLACEHOLDER` is sufficient.  
+**Fix applied:** Tests that need a non-existent entity use `Entity::PLACEHOLDER`. Tests that need a resolvable entity use `world.spawn(component).id()`.
+
+### D4 — `World::send_message` does not exist; use `World::write_message`
+
+**File:** `src/plugins/party/inventory.rs` `app_tests`  
+**Finding:** The World/DeferredWorld API uses `write_message`, not `send_message`. The correct call is `app.world_mut().write_message(event)`.  
+**Fix applied:** Replaced `send_message` → `write_message` in all `app_tests`.
+
+### D5 — `Assets<ItemAsset>` not auto-registered by `AssetPlugin::default()` in tests
+
+**File:** `src/plugins/party/inventory.rs` `app_tests::make_test_app`  
+**Finding:** `AssetPlugin::default()` does not auto-register `Asset`-derived types. Each type must be explicitly registered via `app.init_asset::<T>()`. This is the same pattern already used in `dungeon/tests.rs:161-166` for `DungeonFloor`, `Mesh`, `StandardMaterial`.  
+**Fix applied:** `make_test_app()` calls `app.init_asset::<ItemAsset>()`.
+
+### D6 — ImageMagick v7 `convert` deprecated; `magick` is the correct binary; text annotation requires system font
+
+**File:** `scripts/gen_placeholder_icons.sh`  
+**Finding:** ImageMagick 7.x on Homebrew has deprecated `convert` in favor of `magick`. Additionally, text annotation with `-pointsize`/`-annotate` requires a system font to be configured; with no fonts available in the default Homebrew ImageMagick install, the annotation command errors out.  
+**Fix applied:** Script uses `magick` instead of `convert`. Text annotation removed; icons are solid-color 32×32 PNGs (distinct colors per item kind). This is a minor deviation from the plan's "letter-code labels" spec — the functional requirement (placeholder PNG files for `icon_path` resolution) is fully met.
+
+### D7 — LOC exceeded plan estimate due to extensive doc comments and test harnesses
+
+**Finding:** Final LOC: `inventory.rs` 929 lines, `items.rs` 258 lines, `tests/item_db_loads.rs` 118 lines. The plan estimated ~400 + ~60 + ~70 = ~530 LOC. The overage (~400 LOC) comes from:  
+- Comprehensive doc comments on every function (pitfall references, contract notes, no-serde rationale).  
+- Layer-1 test harnesses requiring `MessageRegistry::register_message` + `World::spawn` setup (more verbose than a minimal `App` approach).  
+- The plan's LOC estimate excluded doc comment overhead.  
+No functional scope was added. `Cargo.toml` remains byte-unchanged (0 new deps).
+
+### D8 — `FnOnce` vs `FnMut` closure constraint in `run_system_once`
+
+**File:** `src/plugins/party/inventory.rs` Layer-1 test `equip_sword_in_armor_slot_returns_slot_mismatch`  
+**Finding:** A closure that moves a captured variable out via `drop(v)` inside the body implements `FnOnce`, which is incompatible with `run_system_once`'s `IntoSystem` bound (which requires `FnMut`). The `drop()` call was unnecessary (the handle's lifetime was not at risk).  
+**Fix applied:** Removed the `drop(handle)` line; added a comment noting the handle stays alive in the outer scope.
 
 ---
 
@@ -440,24 +488,24 @@ Confirms the roadmap budget at line 666-670:
 
 ## Verification
 
-- [ ] `data/items.rs` Layer-1 round-trip tests pass — Layer-1 unit — `cargo test data::items::tests` — Automatic
-- [ ] `inventory.rs` Layer-1 slot-validation tests pass — Layer-1 unit — `cargo test plugins::party::inventory::tests` — Automatic
-- [ ] `inventory.rs` Layer-2 recompute test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::equip_sword_raises_attack_unequip_lowers` — Automatic
-- [ ] `inventory.rs` Layer-2 message-emit test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::equip_emits_message_via_helper` — Automatic
-- [ ] `inventory.rs` Layer-2 give-item test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::give_item_pushes_to_inventory` — Automatic
-- [ ] `core.items.ron` parses through `RonAssetPlugin` — Integration — `cargo test --test item_db_loads` — Automatic
-- [ ] `cargo check && cargo check --features dev` — Build — Automatic
-- [ ] `cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features dev -- -D warnings` — Lint — Automatic
-- [ ] `cargo fmt --check` — Format — Automatic
-- [ ] `cargo test && cargo test --features dev` — Full test suite — Automatic
-- [ ] No `Event` derive sneaks in — Grep — `rg 'derive\(.*\bEvent\b' src/plugins/party/inventory.rs` — Automatic (must return ZERO matches; only `Message` is allowed)
-- [ ] No `EventReader` consumer sneaks in — Grep — `rg '\bEventReader<' src/plugins/party/inventory.rs tests/item_db_loads.rs` — Automatic (must return ZERO matches)
-- [ ] No edits to frozen files — Grep — `git diff --name-only main HEAD -- src/plugins/party/character.rs src/plugins/loading/mod.rs src/plugins/state/mod.rs src/plugins/input/mod.rs src/plugins/dungeon/mod.rs src/plugins/audio/ src/plugins/ui/ src/data/dungeon.rs src/data/spells.rs src/data/enemies.rs src/data/classes.rs src/main.rs Cargo.toml Cargo.lock` — Automatic (must return ZERO matches)
+- [x] `data/items.rs` Layer-1 round-trip tests pass — Layer-1 unit — `cargo test data::items::tests` — Automatic
+- [x] `inventory.rs` Layer-1 slot-validation tests pass — Layer-1 unit — `cargo test plugins::party::inventory::tests` — Automatic
+- [x] `inventory.rs` Layer-2 recompute test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::equip_sword_raises_attack_unequip_lowers` — Automatic
+- [x] `inventory.rs` Layer-2 message-emit test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::equip_emits_message_via_helper` — Automatic
+- [x] `inventory.rs` Layer-2 give-item test passes — Layer-2 integration — `cargo test plugins::party::inventory::app_tests::give_item_pushes_to_inventory` — Automatic
+- [x] `core.items.ron` parses through `RonAssetPlugin` — Integration — `cargo test --test item_db_loads` — Automatic
+- [x] `cargo check && cargo check --features dev` — Build — Automatic
+- [x] `cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features dev -- -D warnings` — Lint — Automatic
+- [x] `cargo fmt --check` — Format — Automatic
+- [x] `cargo test && cargo test --features dev` — Full test suite — Automatic
+- [x] No `Event` derive sneaks in — Grep — `rg 'derive\(.*\bEvent\b' src/plugins/party/inventory.rs` — Automatic (must return ZERO matches; only `Message` is allowed)
+- [x] No `EventReader` consumer sneaks in — Grep — `rg '\bEventReader<' src/plugins/party/inventory.rs tests/item_db_loads.rs` — Automatic (must return ZERO matches)
+- [x] No edits to frozen files — Grep — verified via `git diff 8865b26 f4ca434 --name-only` (origin/main to feature commit); zero frozen file modifications
 - [ ] No asset-load panic at startup — Smoke — `cargo run --features dev` and navigate to Dungeon via F9 cycler — Manual
 - [ ] 4 debug party members spawn with empty `Inventory` — Smoke — `cargo run --features dev` and confirm console logs `Spawned 4 debug party members`; Inventory component visible in inspector if available — Manual
 - [ ] Tab key has no effect (no UI consumer in #12) — Smoke — In-game press Tab; nothing should happen — Manual
-- [ ] 8 placeholder PNG icons exist — File-existence — `ls -1 assets/ui/icons/items/ | wc -l` — Automatic (must equal 8 for D4=A or 12 for D4=B)
-- [ ] Plan's "Implementation Discoveries" section populated — Documentation — manual review of THIS plan file post-implementation — Manual
+- [x] 8 placeholder PNG icons exist — File-existence — `ls -1 assets/ui/icons/items/ | wc -l` returns 8 — Automatic
+- [x] Plan's "Implementation Discoveries" section populated — Documentation — manual review of THIS plan file post-implementation — Manual
 
 ---
 
