@@ -3,7 +3,7 @@
 //! Each typed RON-loaded schema lives in its own submodule:
 //! - `dungeon` — `DungeonFloor` (Feature #4 fills in the razor-wall grid)
 //! - `items` — `ItemDb`, `ItemAsset`, `ItemStatBlock` (Features #11/#12)
-//! - `enemies` — `EnemyDb` (Features #11/#15)
+//! - `enemies` — `EnemyDb` (Feature #15)
 //! - `classes` — `ClassTable`, `ClassDef` (Feature #11)
 //! - `spells` — `SpellTable` (Feature #20)
 

@@ -80,7 +80,7 @@ fn spawn_default_debug_party(
         ("Borin", Class::Fighter, PartyRow::Back),
     ];
 
-    let count = party_size.0.min(4);
+    let count = debug_party_count(party_size.0);
     for (i, (name, class, row)) in roster.iter().enumerate().take(count) {
         commands.spawn(PartyMemberBundle {
             name: CharacterName((*name).into()),
@@ -93,4 +93,52 @@ fn spawn_default_debug_party(
     }
 
     info!("Spawned {} debug party members", count);
+}
+
+/// Hardcoded length of the debug-party roster — the upper bound on the count
+/// returned by [`debug_party_count`]. Bound to the `roster` array in
+/// [`spawn_default_debug_party`]; both must change together.
+#[cfg(any(test, feature = "dev"))]
+const DEBUG_PARTY_ROSTER_SIZE: usize = 4;
+
+/// How many debug-party members to actually spawn given the configured
+/// `PartySize`: `min(party_size, ROSTER_SIZE)`. Pure function — exists as
+/// a separate symbol so the cap arithmetic is unit-testable without an `App`.
+#[cfg(any(test, feature = "dev"))]
+fn debug_party_count(party_size: usize) -> usize {
+    party_size.min(DEBUG_PARTY_ROSTER_SIZE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PartySize` exceeding the roster length is clamped to the roster length.
+    #[test]
+    fn debug_party_count_clamps_above_roster_size() {
+        assert_eq!(debug_party_count(99), DEBUG_PARTY_ROSTER_SIZE);
+        assert_eq!(debug_party_count(usize::MAX), DEBUG_PARTY_ROSTER_SIZE);
+    }
+
+    /// `PartySize::default()` (4) gets the full roster.
+    #[test]
+    fn debug_party_count_at_roster_size_returns_full() {
+        assert_eq!(
+            debug_party_count(DEBUG_PARTY_ROSTER_SIZE),
+            DEBUG_PARTY_ROSTER_SIZE
+        );
+    }
+
+    /// `PartySize` smaller than the roster returns the configured size.
+    #[test]
+    fn debug_party_count_below_roster_size_returns_party_size() {
+        assert_eq!(debug_party_count(2), 2);
+        assert_eq!(debug_party_count(1), 1);
+    }
+
+    /// Zero-capacity is permitted — system spawns nothing.
+    #[test]
+    fn debug_party_count_zero_returns_zero() {
+        assert_eq!(debug_party_count(0), 0);
+    }
 }

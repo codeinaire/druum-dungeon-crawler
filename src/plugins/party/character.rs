@@ -354,6 +354,8 @@ pub fn derive_stats(
     let base_hp = (base.vitality as u32)
         .saturating_mul(effective_level)
         .saturating_add(effective_level.saturating_mul(5));
+    // Integer division truncates toward zero — RPG round-down convention for
+    // odd `INT + PIE` sums (e.g., (3 + 4) * 1 / 2 = 3, not 3.5). Intentional.
     let base_mp = ((base.intelligence as u32).saturating_add(base.piety as u32))
         .saturating_mul(effective_level)
         / 2;
@@ -453,17 +455,31 @@ mod tests {
 
     // ── derive_stats: zero baseline ──────────────────────────────────────────
 
-    /// With all-zero base stats and no equipment, `attack` is zero;
+    /// With all-zero base stats and no equipment at level 1, `attack` is zero;
     /// `max_hp` and `max_mp` match the level-1 constant baseline
     /// (VIT=0 * level + level * 5 = 5; MP = 0).
     #[test]
-    fn derive_stats_returns_zero_for_zero_inputs() {
+    fn derive_stats_returns_baseline_for_zero_stats_at_level_1() {
         let result = derive_stats(&BaseStats::ZERO, &[], &StatusEffects::default(), 1);
         assert_eq!(result.attack, 0);
         assert_eq!(result.max_hp, 5, "level-1 baseline HP (VIT=0 * 1 + 1 * 5)");
         assert_eq!(result.max_mp, 0, "level-1 baseline MP (INT=0 + PIE=0) / 2");
         assert_eq!(result.current_hp, result.max_hp);
         assert_eq!(result.current_mp, result.max_mp);
+    }
+
+    /// Level 0 must clamp to level 1 via `level.max(1)` — derived stats at
+    /// level 0 should be byte-identical to derived stats at level 1.
+    /// Regression guard for the level-0 edge case the previous test name
+    /// implied but did not actually exercise.
+    #[test]
+    fn derive_stats_clamps_level_zero_to_one() {
+        let at_zero = derive_stats(&BaseStats::ZERO, &[], &StatusEffects::default(), 0);
+        let at_one = derive_stats(&BaseStats::ZERO, &[], &StatusEffects::default(), 1);
+        assert_eq!(
+            at_zero, at_one,
+            "level 0 must produce identical output to level 1"
+        );
     }
 
     // ── derive_stats: equipment stacks additively ────────────────────────────
