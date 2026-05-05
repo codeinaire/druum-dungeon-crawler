@@ -42,7 +42,7 @@ use crate::data::dungeon::{Direction, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
-use crate::plugins::state::{DungeonSubState, GameState};
+use crate::plugins::state::GameState;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -214,9 +214,7 @@ impl Plugin for DungeonPlugin {
                 Update,
                 (
                     handle_dungeon_input
-                        .run_if(
-                            in_state(GameState::Dungeon).and(in_state(DungeonSubState::Exploring)),
-                        )
+                        .run_if(in_state(GameState::Dungeon))
                         .before(animate_movement),
                     animate_movement.run_if(in_state(GameState::Dungeon)),
                     flicker_torches.run_if(in_state(GameState::Dungeon)),
@@ -594,8 +592,10 @@ fn spawn_dungeon_geometry(
     );
 }
 
-/// `Update` (gated on `GameState::Dungeon && DungeonSubState::Exploring`) —
-/// translate `ActionState<DungeonAction>` input into grid moves.
+/// `Update` (gated on `GameState::Dungeon`) — translate `ActionState<DungeonAction>`
+/// input into grid moves. Runs in both `DungeonSubState::Exploring` AND
+/// `DungeonSubState::Map` so the player can walk while looking at the map
+/// (Wizardry-canonical — the map updates as you move).
 ///
 /// **Input-drop policy:** the query filter `Without<MovementAnimation>` means
 /// any key press during an in-flight tween is silently dropped. No buffer.
@@ -606,8 +606,16 @@ fn spawn_dungeon_geometry(
 /// immediately, not after the tween completes.
 ///
 /// Tolerant of missing `DungeonAssets` / unloaded `DungeonFloor`.
+///
+/// **Visibility is `pub(crate)`** so `MinimapPlugin::update_explored_on_move`
+/// can use `.after(handle_dungeon_input)` for system ordering (Feature #10
+/// Pitfall 3: minimap subscriber must run after input handler to guarantee
+/// `MovedEvent` is published before the subscriber reads it in the same frame).
+/// Do not make this `pub` (no external consumer needed) or `fn` (ordering
+/// coupling would silently break). If you remove `pub(crate)`, `minimap.rs`
+/// will produce a compile error on the `.after(...)` ordering call.
 #[allow(clippy::type_complexity)]
-fn handle_dungeon_input(
+pub(crate) fn handle_dungeon_input(
     mut commands: Commands,
     actions: Res<ActionState<DungeonAction>>,
     dungeon_assets: Option<Res<DungeonAssets>>,

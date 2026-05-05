@@ -14,3 +14,6 @@
 - [clippy::manual_range_contains — use .contains() not comparison chain](feedback_clippy_manual_range_contains.md) — Use `(lo..=hi).contains(&x)` instead of `x >= lo && x <= hi`; manual_range_contains is enabled under -D warnings
 - [DistanceFog and FogFalloff require explicit bevy::pbr import](feedback_bevy_pbr_fog_explicit_import.md) — Add `use bevy::pbr::{DistanceFog, FogFalloff};` explicitly; prelude does not bring them into scope reliably
 - [clippy::doc_lazy_continuation — continuation lines after doc bullet lists need indentation](feedback_doc_lazy_continuation.md) — Bare continuation lines after `//!` bullet lists trigger doc_lazy_continuation; use new list item or blank separator line
+- [bevy_egui 0.39.x — painters must use EguiPrimaryContextPass, not Update](feedback_bevy_egui_primary_context_pass.md) — EguiContexts::ctx_mut() returns Result; EguiPlugin::default(); Frame::NONE/Frame::new() replaces deprecated Frame::none()
+- [bevy::utils::HashMap removed in Bevy 0.18.1](feedback_bevy_utils_hashmap_removed.md) — Use std::collections::HashMap; bevy::utils::HashMap no longer exists
+- [leafwing ActionState tests — press/update/release/update for just_pressed](feedback_leafwing_actionstate_test_timing.md) — Exclude ActionsPlugin (mouse panic); init ActionState via init_resource; use press/update/release/update to avoid double-firing
