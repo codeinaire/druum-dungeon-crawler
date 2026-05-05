@@ -129,14 +129,18 @@ impl Plugin for MinimapPlugin {
             .add_systems(
                 EguiPrimaryContextPass,
                 (
+                    // Painter ordering vs `update_explored_on_move` is guaranteed
+                    // by schedule topology — the updater runs in `Update`,
+                    // painters run in `EguiPrimaryContextPass` (after `PostUpdate`).
+                    // No `.after()` constraint needed (and Bevy 0.18.1 silently
+                    // ignores cross-schedule ordering anyway:
+                    // bevy_ecs-0.18.1/src/schedule/config.rs:358).
                     paint_minimap_overlay
                         .run_if(in_state(DungeonSubState::Exploring))
-                        .in_set(MinimapSet)
-                        .after(update_explored_on_move),
+                        .in_set(MinimapSet),
                     paint_minimap_full
                         .run_if(in_state(DungeonSubState::Map))
-                        .in_set(MinimapSet)
-                        .after(update_explored_on_move),
+                        .in_set(MinimapSet),
                 ),
             );
 
@@ -454,6 +458,11 @@ fn cell_rect_for(origin: egui::Pos2, cell_size: f32, x: u32, y: u32) -> egui::Re
 }
 
 /// Returns `true` if the wall type should be drawn as a solid line.
+///
+/// Regular `Door` is intentionally OMITTED — doors render as open passages
+/// on the map (visually identical to `Open`). Distinct door rendering (open/
+/// closed/locked icons) is Feature #13's scope. `LockedDoor` and `SecretWall`
+/// render as solid because the player can't currently traverse them.
 fn is_solid(w: crate::data::dungeon::WallType) -> bool {
     use crate::data::dungeon::WallType;
     matches!(
@@ -594,10 +603,11 @@ mod tests {
         );
     }
 
-    /// A `MovedEvent` to a non-dark-zone cell: subscriber does not panic
-    /// when DungeonAssets is absent (LoadingPlugin omitted to avoid .ogg hang).
+    /// A `MovedEvent` arrives but `DungeonAssets` is absent — subscriber
+    /// must early-return without panic and leave `ExploredCells` empty.
+    /// (LoadingPlugin omitted to avoid .ogg hang in headless tests.)
     #[test]
-    fn subscriber_flips_dest_cell_to_visited() {
+    fn subscriber_early_returns_when_dungeon_assets_absent() {
         use crate::data::dungeon::Direction;
 
         let mut app = make_test_app();
@@ -616,13 +626,106 @@ mod tests {
                 to: GridPosition { x: 1, y: 0 },
                 facing: Direction::East,
             });
-        // DungeonAssets is absent (LoadingPlugin not included — it hangs headless
-        // tests by trying to load .ogg files). The subscriber early-returns safely.
+        // DungeonAssets is absent — subscriber early-returns safely.
         app.update();
 
-        // cells is empty because DungeonAssets was absent — subscriber early-returned.
         let explored = app.world().resource::<ExploredCells>();
         assert_eq!(explored.cells.len(), 0);
+    }
+
+    /// Happy path: with `DungeonAssets` + a loaded `DungeonFloor` present,
+    /// a `MovedEvent` to a non-dark-zone cell flips that cell to `Visited`.
+    #[test]
+    fn subscriber_flips_dest_cell_to_visited_with_assets() {
+        use crate::data::DungeonFloor;
+        use crate::data::dungeon::{CellFeatures, Direction, LightingConfig, WallMask};
+        use crate::plugins::loading::DungeonAssets;
+
+        let mut app = make_test_app();
+
+        // Build + insert a 2×2 floor with no dark zones.
+        let floor = DungeonFloor {
+            name: "test".into(),
+            width: 2,
+            height: 2,
+            floor_number: 7,
+            walls: vec![vec![WallMask::default(); 2]; 2],
+            features: vec![vec![CellFeatures::default(); 2]; 2],
+            entry_point: (0, 0, Direction::North),
+            encounter_table: "test".into(),
+            lighting: LightingConfig::default(),
+        };
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<DungeonFloor>>()
+            .add(floor);
+        app.world_mut().insert_resource(DungeonAssets {
+            floor_01: handle,
+            item_db: Handle::default(),
+            enemy_db: Handle::default(),
+            class_table: Handle::default(),
+            spell_table: Handle::default(),
+        });
+
+        // Drive into Dungeon and emit a move to (1, 0).
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update();
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 0, y: 0 },
+                to: GridPosition { x: 1, y: 0 },
+                facing: Direction::East,
+            });
+        app.update();
+
+        let explored = app.world().resource::<ExploredCells>();
+        assert_eq!(explored.cells.len(), 1, "exactly one cell should be marked");
+        assert_eq!(
+            explored.cells.get(&(7, 1, 0)).copied(),
+            Some(ExploredState::Visited),
+            "destination cell (floor 7, x=1, y=0) must be Visited"
+        );
+    }
+
+    /// Smoke-test bug #1 regression guard: `attach_egui_to_dungeon_camera`
+    /// must insert `PrimaryEguiContext` on the dungeon `Camera3d` after
+    /// state transitions to `Dungeon`. Without this, `EguiContexts::ctx_mut()`
+    /// returns Err and painters silently no-op (no minimap renders).
+    #[test]
+    fn attach_egui_to_dungeon_camera_attaches_marker() {
+        use crate::plugins::dungeon::DungeonCamera;
+
+        let mut app = make_test_app();
+
+        // Spawn a stand-in dungeon camera (no Camera3d needed — the attach
+        // system filters on DungeonCamera).
+        let camera = app.world_mut().spawn(DungeonCamera).id();
+
+        // Drive into Dungeon so the attach system's run_if gate passes.
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update(); // state transition realises
+        app.update(); // attach_egui_to_dungeon_camera runs
+
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<bevy_egui::PrimaryEguiContext>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            count, 1,
+            "PrimaryEguiContext must be attached to the dungeon camera"
+        );
+        assert!(
+            app.world()
+                .entity(camera)
+                .contains::<bevy_egui::PrimaryEguiContext>(),
+            "marker must land on the DungeonCamera entity specifically"
+        );
     }
 
     /// When `ExploredCells` starts empty and no event is sent, it stays empty.
