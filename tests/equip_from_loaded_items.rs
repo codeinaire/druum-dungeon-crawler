@@ -38,7 +38,7 @@ use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 use druum::data::{ItemAsset, ItemDb};
 use druum::plugins::party::{
-    DerivedStats, Equipment, EquipmentChangedEvent, EquipSlot, Inventory, ItemHandleRegistry,
+    DerivedStats, EquipSlot, Equipment, EquipmentChangedEvent, Inventory, ItemHandleRegistry,
     PartyMemberBundle, PartyPlugin, recompute_derived_stats_on_equipment_change,
 };
 use druum::plugins::state::{GameState, StatePlugin};
@@ -90,8 +90,12 @@ fn equipping_loaded_rusty_sword_raises_attack() {
                 .continue_to_state(GameState::TitleScreen)
                 .load_collection::<TestItemAssets>(),
         )
-        // Safety net — same 30s budget as class_table_loads.rs.
-        .add_systems(Update, timeout.run_if(in_state(GameState::Loading)))
+        // Safety net — runs every frame regardless of state. 30s budget
+        // covers BOTH a stalled Loading transition AND a stalled TitleScreen
+        // assertion (e.g., spawn_test_character_with_loaded_sword silently
+        // returning without spawning, which would leave assert_attack_then_exit
+        // looping on an empty query).
+        .add_systems(Update, timeout)
         // Bridge ran on OnExit(Loading); next state is TitleScreen. Set up
         // the test scenario when we land there.
         .add_systems(
@@ -110,12 +114,14 @@ fn equipping_loaded_rusty_sword_raises_attack() {
         .run();
 }
 
-fn timeout(time: Res<Time>) {
+fn timeout(time: Res<Time>, state: Res<State<GameState>>) {
     if time.elapsed_secs_f64() > 30.0 {
         panic!(
-            "GameState::Loading did not transition to TitleScreen in 30s — \
-             check that core.items.ron parses cleanly and that PartyPlugin's \
-             bridge registration is intact"
+            "Test did not complete in 30s (currently in {:?}) — check that \
+             core.items.ron parses cleanly, PartyPlugin's bridge registration \
+             is intact, and spawn_test_character_with_loaded_sword actually \
+             spawns the TestCharacter entity",
+            state.get()
         );
     }
 }

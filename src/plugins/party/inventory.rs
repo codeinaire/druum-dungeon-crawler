@@ -651,12 +651,11 @@ mod tests {
             .expect("run_system_once must succeed");
     }
 
-    /// An item with `kind: Consumable` is rejected. Because Commands-spawned
-    /// entities are deferred (not queryable same frame), the item entity can't be
-    /// resolved by `instances.get()` — so `ItemMissingComponents` fires first.
-    /// Both `ItemHasNoSlot` and `ItemMissingComponents` are valid failure results
-    /// for this code path; the important invariant is that equipping a consumable
-    /// never succeeds.
+    /// An item with `kind: Consumable` is rejected. The asset is added directly
+    /// (not via Commands) so `instances.get(item_entity)` resolves on the same
+    /// system run; the rejection therefore comes from the item's `kind`, not
+    /// from a missing `ItemInstance` lookup, and asserts precisely
+    /// `Err(ItemHasNoSlot)`.
     #[test]
     fn equip_consumable_returns_item_has_no_slot() {
         let mut world = World::new();
@@ -999,6 +998,273 @@ mod app_tests {
             inv.0.len(),
             1,
             "Inventory should have 1 item after give_item"
+        );
+    }
+
+    /// `unequip_item` helper clears the slot and pushes the handle back to
+    /// the bag. Exercises the helper directly — `equip_sword_raises_attack_unequip_lowers`
+    /// only mutates `Equipment::weapon = None` in place, so it never covers
+    /// `unequip_item`'s body.
+    #[test]
+    fn unequip_item_helper_returns_to_inventory() {
+        let mut app = make_test_app();
+
+        let sword_handle = {
+            let mut item_assets = app.world_mut().resource_mut::<Assets<ItemAsset>>();
+            item_assets.add(ItemAsset {
+                id: "unequip_sword".to_string(),
+                display_name: "Unequip Sword".to_string(),
+                kind: ItemKind::Weapon,
+                slot: EquipSlot::Weapon,
+                stats: ItemStatBlock::default(),
+                weight: 0,
+                value: 0,
+                icon_path: String::new(),
+                stackable: false,
+            })
+        };
+
+        // Spawn the character with the sword already equipped, bag empty.
+        let char_entity = app
+            .world_mut()
+            .spawn((
+                PartyMemberBundle {
+                    equipment: Equipment {
+                        weapon: Some(sword_handle.clone()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                Inventory::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut char_query: Query<
+                    (&mut Equipment, &mut Inventory),
+                    With<PartyMember>,
+                >,
+                      mut writer: MessageWriter<EquipmentChangedEvent>| {
+                    let result = unequip_item(
+                        &mut commands,
+                        char_entity,
+                        EquipSlot::Weapon,
+                        &mut char_query,
+                        &mut writer,
+                    );
+                    assert_eq!(result, Ok(()));
+                },
+            )
+            .expect("run_system_once must succeed");
+
+        // Commands flush on update — that's when the new ItemInstance entity
+        // becomes visible in the Inventory vec.
+        app.update();
+
+        let eq = app.world().entity(char_entity).get::<Equipment>().unwrap();
+        assert!(
+            eq.weapon.is_none(),
+            "Equipment::weapon should be None after unequip_item"
+        );
+        let inv = app.world().entity(char_entity).get::<Inventory>().unwrap();
+        assert_eq!(
+            inv.0.len(),
+            1,
+            "Inventory should hold the un-equipped item (1 entity), got {}",
+            inv.0.len()
+        );
+
+        // The new bag entity should carry the original sword handle.
+        let returned = inv.0[0];
+        let returned_instance = app
+            .world()
+            .entity(returned)
+            .get::<ItemInstance>()
+            .expect("returned entity should carry an ItemInstance");
+        assert_eq!(
+            returned_instance.0, sword_handle,
+            "returned ItemInstance should hold the original sword handle"
+        );
+    }
+
+    /// Equipping a second weapon while a first is already in the slot must
+    /// evict the previous occupant back to the bag — covers step 7 of
+    /// `equip_item`. `equip_emits_message_via_helper` starts with an empty
+    /// slot, so it never exercises the eviction path.
+    #[test]
+    fn equip_item_evicts_previous_slot_occupant_to_inventory() {
+        let mut app = make_test_app();
+
+        let first_handle = {
+            let mut item_assets = app.world_mut().resource_mut::<Assets<ItemAsset>>();
+            item_assets.add(ItemAsset {
+                id: "first_sword".to_string(),
+                display_name: "First Sword".to_string(),
+                kind: ItemKind::Weapon,
+                slot: EquipSlot::Weapon,
+                stats: ItemStatBlock::default(),
+                weight: 0,
+                value: 0,
+                icon_path: String::new(),
+                stackable: false,
+            })
+        };
+        let second_handle = {
+            let mut item_assets = app.world_mut().resource_mut::<Assets<ItemAsset>>();
+            item_assets.add(ItemAsset {
+                id: "second_sword".to_string(),
+                display_name: "Second Sword".to_string(),
+                kind: ItemKind::Weapon,
+                slot: EquipSlot::Weapon,
+                stats: ItemStatBlock::default(),
+                weight: 0,
+                value: 0,
+                icon_path: String::new(),
+                stackable: false,
+            })
+        };
+
+        // Spawn: first sword equipped; second sword sits as an inventory entity
+        // ready to be equipped.
+        let second_item_entity = app
+            .world_mut()
+            .spawn(ItemInstance(second_handle.clone()))
+            .id();
+        let char_entity = app
+            .world_mut()
+            .spawn((
+                PartyMemberBundle {
+                    equipment: Equipment {
+                        weapon: Some(first_handle.clone()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                Inventory(vec![second_item_entity]),
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      items: Res<Assets<ItemAsset>>,
+                      instances: Query<&ItemInstance>,
+                      mut char_query: Query<
+                    (&mut Equipment, &mut Inventory),
+                    With<PartyMember>,
+                >,
+                      mut writer: MessageWriter<EquipmentChangedEvent>| {
+                    let result = equip_item(
+                        &mut commands,
+                        char_entity,
+                        second_item_entity,
+                        EquipSlot::Weapon,
+                        &items,
+                        &instances,
+                        &mut char_query,
+                        &mut writer,
+                    );
+                    assert_eq!(result, Ok(()));
+                },
+            )
+            .expect("run_system_once must succeed");
+
+        app.update();
+
+        // After equip: weapon slot holds the new handle; the bag holds exactly
+        // one entity — the evicted previous occupant. The original
+        // second_item_entity has been despawned (consumed by the slot).
+        let eq = app.world().entity(char_entity).get::<Equipment>().unwrap();
+        assert_eq!(
+            eq.weapon.as_ref(),
+            Some(&second_handle),
+            "Equipment::weapon should hold the second (newly-equipped) handle"
+        );
+        let inv = app.world().entity(char_entity).get::<Inventory>().unwrap();
+        assert_eq!(
+            inv.0.len(),
+            1,
+            "Inventory should hold exactly the evicted previous occupant, got {}",
+            inv.0.len()
+        );
+
+        let evicted = inv.0[0];
+        let evicted_instance = app
+            .world()
+            .entity(evicted)
+            .get::<ItemInstance>()
+            .expect("evicted entity should carry an ItemInstance");
+        assert_eq!(
+            evicted_instance.0, first_handle,
+            "evicted ItemInstance should hold the previous (first) sword handle"
+        );
+    }
+
+    /// Calling `give_item` against an entity that lacks `Inventory` /
+    /// `PartyMember` must return `Err(CharacterMissingComponents)` AND
+    /// despawn the just-spawned `ItemInstance` so it doesn't leak.
+    #[test]
+    fn give_item_with_missing_character_cleans_up_spawned_entity() {
+        let mut app = make_test_app();
+
+        let potion_handle = {
+            let mut item_assets = app.world_mut().resource_mut::<Assets<ItemAsset>>();
+            item_assets.add(ItemAsset {
+                id: "leak_potion".to_string(),
+                display_name: "Leak Potion".to_string(),
+                kind: ItemKind::Consumable,
+                slot: EquipSlot::None,
+                stats: ItemStatBlock::default(),
+                weight: 0,
+                value: 0,
+                icon_path: String::new(),
+                stackable: false,
+            })
+        };
+
+        // Spawn an entity WITHOUT Inventory or PartyMember — char_query will
+        // fail to resolve it, triggering the cleanup branch.
+        let bogus_entity = app.world_mut().spawn_empty().id();
+
+        // Pre-condition: zero ItemInstance entities in the world.
+        assert_eq!(
+            app.world_mut()
+                .query::<&ItemInstance>()
+                .iter(app.world())
+                .count(),
+            0,
+            "world should start with zero ItemInstance entities"
+        );
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut char_query: Query<&mut Inventory, With<PartyMember>>| {
+                    let result = give_item(
+                        &mut commands,
+                        bogus_entity,
+                        potion_handle.clone(),
+                        &mut char_query,
+                    );
+                    assert_eq!(result, Err(EquipError::CharacterMissingComponents));
+                },
+            )
+            .expect("run_system_once must succeed");
+
+        // Both the spawn and the cleanup despawn are queued as Commands; one
+        // update flushes them. The spawn-then-despawn must net to zero.
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ItemInstance>()
+                .iter(app.world())
+                .count(),
+            0,
+            "ItemInstance entity must be cleaned up when give_item fails — \
+             leak indicates the cleanup despawn in give_item was skipped"
         );
     }
 }
