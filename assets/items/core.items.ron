@@ -1,3 +1,111 @@
-// Stub for Feature #3 — ItemDb has no fields yet.
-// Features #11/#12 add the real item schema.
-()
+// Feature #12 — 8 starter items.
+// Exercises 5 of 9 ItemKind variants: Weapon, Armor, Shield, Consumable, KeyItem.
+// Fields with #[serde(default)] are omitted when zero/false (saves file noise).
+//
+// FROZEN PATH: `RonAssetPlugin::<ItemDb>::new(&["items.ron"])` in loading/mod.rs
+// expects this file at `assets/items/core.items.ron`. Do NOT rename or move.
+(
+    items: [
+        // ── Weapons ──────────────────────────────────────────────────────────
+        (
+            id: "rusty_sword",
+            display_name: "Rusty Sword",
+            kind: Weapon,
+            slot: Weapon,
+            stats: (
+                attack: 5,
+            ),
+            weight: 3,
+            value: 10,
+            icon_path: "ui/icons/items/rusty_sword.png",
+        ),
+        (
+            id: "oak_staff",
+            display_name: "Oak Staff",
+            kind: Weapon,
+            slot: Weapon,
+            stats: (
+                attack: 2,
+                magic_attack: 3,
+            ),
+            weight: 2,
+            value: 15,
+            icon_path: "ui/icons/items/oak_staff.png",
+        ),
+        (
+            id: "wooden_mace",
+            display_name: "Wooden Mace",
+            kind: Weapon,
+            slot: Weapon,
+            stats: (
+                attack: 4,
+                magic_attack: 1,
+            ),
+            weight: 4,
+            value: 12,
+            icon_path: "ui/icons/items/wooden_mace.png",
+        ),
+        // ── Armor ────────────────────────────────────────────────────────────
+        (
+            id: "leather_armor",
+            display_name: "Leather Armor",
+            kind: Armor,
+            slot: Armor,
+            stats: (
+                defense: 3,
+            ),
+            weight: 5,
+            value: 20,
+            icon_path: "ui/icons/items/leather_armor.png",
+        ),
+        (
+            id: "robe",
+            display_name: "Robe",
+            kind: Armor,
+            slot: Armor,
+            stats: (
+                defense: 1,
+                magic_defense: 2,
+                mp_bonus: 5,
+            ),
+            weight: 2,
+            value: 18,
+            icon_path: "ui/icons/items/robe.png",
+        ),
+        // ── Shield ───────────────────────────────────────────────────────────
+        (
+            id: "wooden_shield",
+            display_name: "Wooden Shield",
+            kind: Shield,
+            slot: Shield,
+            stats: (
+                defense: 2,
+            ),
+            weight: 3,
+            value: 8,
+            icon_path: "ui/icons/items/wooden_shield.png",
+        ),
+        // ── Consumable ───────────────────────────────────────────────────────
+        (
+            id: "healing_potion",
+            display_name: "Healing Potion",
+            kind: Consumable,
+            slot: None,
+            stats: (),
+            weight: 1,
+            value: 50,
+            icon_path: "ui/icons/items/healing_potion.png",
+        ),
+        // ── Key Item ─────────────────────────────────────────────────────────
+        (
+            id: "rusty_key",
+            display_name: "Rusty Key",
+            kind: KeyItem,
+            slot: None,
+            stats: (),
+            weight: 0,
+            value: 0,
+            icon_path: "ui/icons/items/rusty_key.png",
+        ),
+    ],
+)
