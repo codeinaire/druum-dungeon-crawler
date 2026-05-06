@@ -5,6 +5,9 @@
 
 use bevy::prelude::*;
 
+use crate::data::ItemAsset;
+use crate::plugins::state::GameState;
+
 pub mod character;
 pub mod inventory;
 
@@ -15,8 +18,9 @@ pub use character::{
 };
 
 pub use inventory::{
-    EquipError, EquipResult, EquipSlot, EquipmentChangedEvent, Inventory, ItemInstance, ItemKind,
-    equip_item, give_item, recompute_derived_stats_on_equipment_change, unequip_item,
+    EquipError, EquipResult, EquipSlot, EquipmentChangedEvent, Inventory, ItemHandleRegistry,
+    ItemInstance, ItemKind, equip_item, give_item, populate_item_handle_registry,
+    recompute_derived_stats_on_equipment_change, unequip_item,
 };
 
 pub struct PartyPlugin;
@@ -44,22 +48,31 @@ impl Plugin for PartyPlugin {
             .register_type::<PartySize>();
 
         // Feature #12 — inventory & equipment data layer. UI lives in #25.
-        app.add_message::<EquipmentChangedEvent>()
+        // `init_asset::<ItemAsset>()` creates the `Assets<ItemAsset>` resource
+        // the recompute system reads. `ItemAsset` is nested inside `ItemDb`
+        // (loaded via `RonAssetPlugin::<ItemDb>` in LoadingPlugin), so it has
+        // no `RonAssetPlugin` of its own and must be registered explicitly.
+        //
+        // `ItemHandleRegistry` + `populate_item_handle_registry` bridge the
+        // loaded `ItemDb.items` into `Assets<ItemAsset>` once on
+        // `OnExit(GameState::Loading)` so production code can resolve item IDs
+        // to working handles (#21 loot, #18 shop, #19 starting gear).
+        app.init_asset::<ItemAsset>()
+            .init_resource::<ItemHandleRegistry>()
+            .add_message::<EquipmentChangedEvent>()
             .register_type::<Inventory>()
             .register_type::<ItemInstance>()
             .register_type::<EquipSlot>()
             .register_type::<ItemKind>()
-            .add_systems(Update, recompute_derived_stats_on_equipment_change);
+            .add_systems(Update, recompute_derived_stats_on_equipment_change)
+            .add_systems(OnExit(GameState::Loading), populate_item_handle_registry);
 
         // Gate: feature = "dev" (NOT cfg(debug_assertions)).
         // Trigger: OnEnter(GameState::Dungeon) (NOT OnEnter(Loading)) — assets
         // are guaranteed loaded by bevy_asset_loader's continue_to_state at
         // Dungeon entry. See #11 plan §Critical Decision 5.
         #[cfg(feature = "dev")]
-        {
-            use crate::plugins::state::GameState;
-            app.add_systems(OnEnter(GameState::Dungeon), spawn_default_debug_party);
-        }
+        app.add_systems(OnEnter(GameState::Dungeon), spawn_default_debug_party);
     }
 }
 

@@ -33,10 +33,12 @@
 //! UI lives in Feature #25. Save/load (`MapEntities` for `Inventory(Vec<Entity>)`,
 //! custom `Handle ↔ AssetPath` serde for `Equipment`) lives in Feature #23.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::data::items::{ItemAsset, ItemStatBlock};
+use crate::data::items::{ItemAsset, ItemDb, ItemStatBlock};
 use crate::plugins::party::character::{
     BaseStats, DerivedStats, Equipment, Experience, PartyMember, StatusEffects, derive_stats,
 };
@@ -476,6 +478,79 @@ pub fn recompute_derived_stats_on_equipment_change(
         derived.current_hp = old_current_hp.min(derived.max_hp);
         derived.current_mp = old_current_mp.min(derived.max_mp);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ItemHandleRegistry — bridge from loaded ItemDb into Assets<ItemAsset>
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lookup table from item ID (e.g., `"rusty_sword"`) to its `Handle<ItemAsset>`
+/// inside `Assets<ItemAsset>`. Populated once on `OnExit(GameState::Loading)`
+/// by [`populate_item_handle_registry`]. Read by future systems that mint
+/// items at runtime — loot drops (#21), shop purchases (#18), starting gear (#19).
+///
+/// Exists because `ItemDb` is loaded as one container asset
+/// (`Handle<ItemDb>` via `RonAssetPlugin::<ItemDb>` in LoadingPlugin) holding
+/// `Vec<ItemAsset>`, while `Equipment` slots are `Option<Handle<ItemAsset>>`
+/// (frozen by #11 Decision 3). Without re-inserting each item into
+/// `Assets<ItemAsset>`, no production code path can produce a working handle.
+///
+/// Hot-reload of `core.items.ron` is **not** supported in v1 — the registry
+/// is built once on Loading exit and never refreshed.
+#[derive(Resource, Default, Debug)]
+pub struct ItemHandleRegistry {
+    handles: HashMap<String, Handle<ItemAsset>>,
+}
+
+impl ItemHandleRegistry {
+    /// Look up the asset handle for a given item ID. `None` if the ID does
+    /// not exist in any loaded `ItemDb`.
+    pub fn get(&self, id: &str) -> Option<&Handle<ItemAsset>> {
+        self.handles.get(id)
+    }
+
+    /// Number of items in the registry.
+    pub fn len(&self) -> usize {
+        self.handles.len()
+    }
+
+    /// True when the registry holds zero items.
+    pub fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+}
+
+/// Iterate every loaded `ItemDb`, clone each contained `ItemAsset` into
+/// `Assets<ItemAsset>`, and record the resulting handle in
+/// [`ItemHandleRegistry`] keyed by `ItemAsset::id`.
+///
+/// Registered on `OnExit(GameState::Loading)` so it runs exactly once after
+/// `bevy_asset_loader` reports all collections `LoadedWithDependencies`. The
+/// registry is cleared at the start to keep the system idempotent if it ever
+/// runs more than once (e.g., a hypothetical Loading-state re-entry).
+///
+/// Each `ItemAsset` is cloned (cheap — small POD struct). Acceptable for
+/// v1 (~10 items); revisit if the catalog grows past a few hundred.
+pub fn populate_item_handle_registry(
+    item_dbs: Res<Assets<ItemDb>>,
+    mut item_assets: ResMut<Assets<ItemAsset>>,
+    mut registry: ResMut<ItemHandleRegistry>,
+) {
+    registry.handles.clear();
+    let mut total = 0;
+    let mut db_count = 0;
+    for (_db_id, item_db) in item_dbs.iter() {
+        db_count += 1;
+        for item in &item_db.items {
+            let handle = item_assets.add(item.clone());
+            registry.handles.insert(item.id.clone(), handle);
+            total += 1;
+        }
+    }
+    info!(
+        "ItemHandleRegistry populated: {} items from {} ItemDb(s)",
+        total, db_count
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
