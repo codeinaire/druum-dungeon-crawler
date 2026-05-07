@@ -538,7 +538,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
 
 Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add Layer-2 tests for each system. This is the largest phase (~300-400 LOC of system bodies + tests).
 
-- [ ] In `src/plugins/dungeon/features.rs`, implement `populate_locked_doors` (`OnEnter(Dungeon)` system, Pitfall 8 clear-first):
+- [x] In `src/plugins/dungeon/features.rs`, implement `populate_locked_doors` (`OnEnter(Dungeon)` system, Pitfall 8 clear-first):
 
   ```rust
   /// Populate `LockedDoors` from `DungeonFloor::locked_doors`. Clears first
@@ -561,7 +561,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       }
   }
   ```
-- [ ] Implement `clear_door_resources` (`OnExit(Dungeon)` system, Security guard #3):
+- [x] Implement `clear_door_resources` (`OnExit(Dungeon)` system, Security guard #3):
 
   ```rust
   fn clear_door_resources(
@@ -574,7 +574,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       pending_teleport.target = None;
   }
   ```
-- [ ] Implement `handle_door_interact` per research §Pattern 2:
+- [x] Implement `handle_door_interact` per research §Pattern 2:
 
   ```rust
   /// Reads `Res<ActionState<DungeonAction>>`; on `Interact` press, looks at the
@@ -611,7 +611,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
   ```
 
   See research §Pattern 2 for the full body. Keep the `info!` log messages on unlock for debug observability.
-- [ ] Implement `apply_pit_trap` per research §Pattern 3 (Pitfall 7 — saturating_sub):
+- [x] Implement `apply_pit_trap` per research §Pattern 3 (Pitfall 7 — saturating_sub):
 
   ```rust
   fn apply_pit_trap(
@@ -631,7 +631,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       //       floor: *target_floor, x: ev.to.x, y: ev.to.y, facing: Some(ev.facing) }}.
   }
   ```
-- [ ] Implement `apply_poison_trap` per research §Pattern 4 (D12 — naive push):
+- [x] Implement `apply_poison_trap` per research §Pattern 4 (D12 — naive push):
 
   ```rust
   fn apply_poison_trap(
@@ -648,7 +648,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       // Emit SfxKind::Door (placeholder hiss; D10-A reuse).
   }
   ```
-- [ ] Implement `apply_alarm_trap` per research §Pattern 7 (D5 — publish + log):
+- [x] Implement `apply_alarm_trap` per research §Pattern 7 (D5 — publish + log):
 
   ```rust
   fn apply_alarm_trap(
@@ -663,7 +663,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       // SfxKind::EncounterSting (D10-A reuse). Log info!("Alarm trap...").
   }
   ```
-- [ ] Implement `apply_teleporter` per research §Pattern 6 — same-floor branch only (cross-floor branch added in Phase 7):
+- [x] Implement `apply_teleporter` per research §Pattern 6 — same-floor branch only (cross-floor branch added in Phase 7):
 
   ```rust
   fn apply_teleporter(
@@ -692,7 +692,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
   ```
 
   **Phase 5 only ships the same-floor branch.** Phase 7 adds the cross-floor `TeleportRequested` emit (the relevant `MessageWriter<TeleportRequested>` SystemParam is wired in this phase but not used until Phase 7).
-- [ ] Implement `apply_spinner` + `tick_screen_wobble` per research §Pattern 5 (D6-A — rotation jitter):
+- [x] Implement `apply_spinner` + `tick_screen_wobble` per research §Pattern 5 (D6-A — rotation jitter):
 
   ```rust
   fn apply_spinner(
@@ -725,7 +725,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       // Body per research §Pattern 5 tick_screen_wobble.
   }
   ```
-- [ ] Implement `apply_anti_magic_zone` per research §Pattern 8:
+- [x] Implement `apply_anti_magic_zone` per research §Pattern 8:
 
   ```rust
   fn apply_anti_magic_zone(
@@ -742,7 +742,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       // move. Document as designer convention; no code change.
   }
   ```
-- [ ] Implement `Plugin for CellFeaturesPlugin::build` per research §Pattern 1:
+- [x] Implement `Plugin for CellFeaturesPlugin::build` per research §Pattern 1:
 
   ```rust
   impl Plugin for CellFeaturesPlugin {
@@ -786,7 +786,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
       }
   }
   ```
-- [ ] In `src/main.rs`, register `CellFeaturesPlugin` (the only modification to `main.rs` per the Frozen list). After the existing `AudioPlugin` line at line 32:
+- [x] In `src/main.rs`, register `CellFeaturesPlugin` (the only modification to `main.rs` per the Frozen list). After the existing `AudioPlugin` line at line 32:
 
   ```rust
   use druum::plugins::{
@@ -803,7 +803,7 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
   ```
 
   Verify with `cargo run --features dev` that the plugin is in the chain.
-- [ ] Add Layer-2 app-driven tests in `mod app_tests` within `features.rs`. Use `MinimalPlugins + AssetPlugin::default() + StatesPlugin + StatePlugin + PartyPlugin + CellFeaturesPlugin` per research §Validation Architecture. Pattern from `inventory.rs::app_tests` and `audio/mod.rs:145-178`.
+- [x] Add Layer-2 app-driven tests in `mod app_tests` within `features.rs`. Use `MinimalPlugins + AssetPlugin::default() + StatesPlugin + StatePlugin + PartyPlugin + CellFeaturesPlugin` per research §Validation Architecture. Pattern from `inventory.rs::app_tests` and `audio/mod.rs:145-178`.
 
   Tests to add (each uses `make_test_app()` factory):
 
@@ -844,11 +844,11 @@ Implement the 9 systems and the Plugin impl. Wire the plugin into `main.rs`. Add
   5. Writes a `MovedEvent` directly via `app.world_mut().write_message(MovedEvent { from: ..., to: GridPosition { x: 1, y: 1 }, facing: ... })`.
   6. Calls `app.update()`.
   7. Asserts: `current_hp` reduced; `Messages<TeleportRequested>` drained with expected payload; `StatusEffects.effects` contains Poison; `Messages<EncounterRequested>` non-empty; `Facing` mutated; `ScreenWobble` component present; `AntiMagicZone` component present/absent.
-- [ ] **Verification (atomic commit boundary):**
+- [x] **Verification (atomic commit boundary):**
   - `cargo check` — succeeds (compile errors here surface mismatched function signatures).
   - `cargo check --features dev` — succeeds.
   - `cargo test plugins::dungeon::features::tests` — Layer-1 passes (4).
-  - `cargo test plugins::dungeon::features::app_tests` — Layer-2 passes (7).
+  - `cargo test plugins::dungeon::features::app_tests` — Layer-2 passes (8 — cross_floor_teleport_publishes_request included here, not Phase 7).
   - `cargo test` — full suite passes; existing dungeon/minimap/inventory tests must remain green.
   - `cargo run --features dev` — manual smoke: navigate via F9 cycler to Dungeon. Walk into the spinner cell at (2,2) — observe `SpinnerWhoosh` + facing change + brief rotation jitter. Walk into the pit at (4,4) — HP drops on all 4 party members. Walk into the alarm cell (none in floor_01 by default — skip; covered by Layer-2 test only).
 
@@ -1285,7 +1285,21 @@ The trust boundary for #13 is the on-disk `floor_*.dungeon.ron` and `core.items.
 
 **Fix applied:** Added `sfx_spinner_whoosh: h.clone()` and `sfx_door_close: h.clone()` to the stub `AudioAssets` in `audio/mod.rs` test helper. Bounded deviation in frozen file — minimum-correct fix.
 
-### D-I1 — Plan claimed "existing tests pass unchanged" for `#[serde(default)]` fields; Rust struct literals require explicit values
+### D-I4 — Layer-2 tests require init_asset::<ItemDb> and advance_into_dungeon before floor insertion
+
+**Finding:** PartyPlugin's `populate_item_handle_registry` runs on `OnExit(Loading)`. When the test app transitions to Dungeon, it exits Loading, triggering this system which requires `Res<Assets<ItemDb>>`. Must call `app.init_asset::<ItemDb>()` in `make_test_app`. Also, cell-feature systems have `.run_if(in_state(Dungeon))` — tests must call `advance_into_dungeon(&mut app)` before inserting the test floor (so `OnEnter(Dungeon)` systems fire without DungeonAssets and early-return), then insert the floor and spawn entities.
+
+**Fix applied:** Added `app.init_asset::<crate::data::ItemDb>()` to `make_test_app`. Added `advance_into_dungeon` helper. Each test calls it before `insert_test_floor`.
+
+### D-I3 — apply_teleporter MessageWriter<MovedEvent> conflicts with other systems' MessageReader<MovedEvent>
+
+**File:** `src/plugins/dungeon/features.rs`
+
+**Finding:** `apply_teleporter` had `MessageWriter<MovedEvent>` (exclusive, `ResMut<Messages<T>>`) to re-publish `MovedEvent` after same-floor teleport. This conflicts with all other cell-feature systems using `MessageReader<MovedEvent>` (shared, `Res<Messages<T>>`). Bevy B0002 error fires even with `.chain()` because the conflict detection is at system registration time for the resource access pattern.
+
+**Fix applied:** Removed `MessageWriter<MovedEvent>` from `apply_teleporter`. Same-floor teleport mutates `GridPosition`/`Facing`/`Transform` directly but does NOT re-publish `MovedEvent`. The destination cell will be marked by the minimap on the player's NEXT move instead of same-frame. This is acceptable for v1. The plan's plan note "re-publishes so minimap fires" is a nice-to-have that created a fundamental system conflict.
+
+### D-I2 — AudioAssets struct literal in audio/mod.rs tests also needs new fields
 
 **File:** `src/data/items.rs`, `src/data/dungeon.rs`, `src/plugins/dungeon/tests.rs`, `src/plugins/party/inventory.rs`, `src/plugins/ui/minimap.rs`
 

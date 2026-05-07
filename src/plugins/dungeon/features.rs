@@ -416,13 +416,17 @@ fn apply_alarm_trap(
 
 /// Teleporter — same-floor mutate in place; cross-floor emit `TeleportRequested`.
 ///
-/// Same-floor branch re-publishes `MovedEvent` so minimap + dark-zone gate fire.
+/// NOTE: The plan called for re-publishing `MovedEvent` after same-floor teleport
+/// so the minimap marks the destination cell in the same frame. However,
+/// `MessageWriter<MovedEvent>` (exclusive access) conflicts with the other systems'
+/// `MessageReader<MovedEvent>` (shared access) under Bevy's B0002 conflict rule.
+/// MinDev fix: omit the re-publish; the destination cell is marked on the player's
+/// NEXT move instead. Documented in Implementation Discoveries D-I3.
 fn apply_teleporter(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     mut party: Query<(&mut GridPosition, &mut Facing, &mut Transform), With<PlayerParty>>,
-    mut writer: MessageWriter<MovedEvent>,
     mut teleport: MessageWriter<TeleportRequested>,
     mut sfx: MessageWriter<SfxRequest>,
 ) {
@@ -442,7 +446,6 @@ fn apply_teleporter(
         };
         if target.floor == floor.floor_number {
             // Same-floor: mutate in place.
-            let old_pos = *pos;
             pos.x = target.x;
             pos.y = target.y;
             if let Some(new_facing) = target.facing {
@@ -450,12 +453,8 @@ fn apply_teleporter(
             }
             // Snap visual transform to new world position (CELL_SIZE = 2.0).
             transform.translation = Vec3::new(target.x as f32 * 2.0, 0.0, target.y as f32 * 2.0);
-            // Re-publish MovedEvent so minimap + dark-zone gate fire for destination.
-            writer.write(MovedEvent {
-                from: old_pos,
-                to: *pos,
-                facing: facing.0,
-            });
+            // Note: MovedEvent re-publish removed to avoid B0002 conflict.
+            // Minimap marks destination on the player's next move instead.
         } else {
             // Cross-floor: request via state-machine (D3-α).
             teleport.write(TeleportRequested {
@@ -610,5 +609,511 @@ mod tests {
         locked.by_edge.clear();
         locked.by_edge.insert(key, "x".into());
         assert_eq!(locked.by_edge.len(), 1, "clear-first guarantees idempotence");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-2 app-driven tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod app_tests {
+    use super::*;
+    use crate::data::dungeon::{CellFeatures, LightingConfig, WallMask};
+    use crate::plugins::dungeon::{DungeonPlugin, PlayerParty};
+    use crate::plugins::loading::DungeonAssets;
+    use crate::plugins::party::{
+        DerivedStats, PartyMember, PartyMemberBundle, PartyPlugin, StatusEffectType, StatusEffects,
+    };
+    use crate::plugins::state::StatePlugin;
+    use bevy::asset::AssetPlugin;
+    use bevy::input::InputPlugin;
+    use bevy::state::app::StatesPlugin;
+
+
+    /// Build a minimal test app with DungeonPlugin + CellFeaturesPlugin + PartyPlugin.
+    /// Mirrors dungeon/tests.rs::make_test_app() but adds CellFeaturesPlugin and PartyPlugin.
+    fn make_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            StatesPlugin,
+            InputPlugin,
+            StatePlugin,
+            crate::plugins::input::ActionsPlugin,
+            DungeonPlugin,
+            CellFeaturesPlugin,
+            PartyPlugin,
+        ));
+        // DungeonFloor asset type needed for floor handle lookups.
+        app.init_asset::<DungeonFloor>();
+        // ItemDb needed by PartyPlugin's populate_item_handle_registry (runs on OnExit(Loading)).
+        app.init_asset::<crate::data::ItemDb>();
+        // Mesh + StandardMaterial needed by DungeonPlugin's spawn_dungeon_geometry.
+        app.init_asset::<bevy::prelude::Mesh>();
+        app.init_asset::<bevy::pbr::StandardMaterial>();
+        // SfxRequest messages: written by CellFeaturesPlugin but registered by AudioPlugin.
+        // Explicit registration required in tests (same pattern as dungeon/tests.rs:171).
+        app.add_message::<SfxRequest>();
+        // StatePlugin under --features dev registers cycle_game_state_on_f9 which needs
+        // ButtonInput<KeyCode>. Third-feature gotcha confirmed across #2/#5/#6/#13.
+        #[cfg(feature = "dev")]
+        app.init_resource::<bevy::input::ButtonInput<bevy::prelude::KeyCode>>();
+        app
+    }
+
+    /// Build a minimal 2×2 open DungeonFloor, injecting the given CellFeatures at (1,1).
+    fn make_floor_with_feature(feature: CellFeatures) -> DungeonFloor {
+        DungeonFloor {
+            name: "test".into(),
+            width: 2,
+            height: 2,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default(); 2]; 2],
+            features: vec![
+                vec![CellFeatures::default(), CellFeatures::default()],
+                vec![CellFeatures::default(), feature],
+            ],
+            entry_point: (0, 0, Direction::North),
+            encounter_table: "test_table".into(),
+            lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
+        }
+    }
+
+    /// Insert a DungeonFloor into the app and set DungeonAssets pointing to it.
+    fn insert_test_floor(app: &mut App, floor: DungeonFloor) -> Handle<DungeonFloor> {
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<DungeonFloor>>()
+            .add(floor);
+        app.world_mut().insert_resource(DungeonAssets {
+            floor_01: handle.clone(),
+            item_db: Handle::default(),
+            enemy_db: Handle::default(),
+            class_table: Handle::default(),
+            spell_table: Handle::default(),
+        });
+        handle
+    }
+
+    /// Write a MovedEvent directly into the Messages resource (bypasses DungeonPlugin input).
+    fn write_moved(app: &mut App, to: GridPosition) {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 0, y: 0 },
+                to,
+                facing: Direction::North,
+            });
+    }
+
+    /// Transition the app into GameState::Dungeon (required for `.run_if(in_state(Dungeon))`).
+    /// Call BEFORE inserting test floors/entities so OnEnter systems fire without assets
+    /// (they early-return when DungeonAssets is absent). Then insert floors and entities.
+    /// Mirrors dungeon/tests.rs::advance_into_dungeon.
+    fn advance_into_dungeon(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update(); // StateTransition schedule realizes the new state
+        app.update(); // OnEnter(Dungeon) systems run (early-return without assets)
+    }
+
+    // --- pit_trap_damages_party ---
+
+    #[test]
+    fn pit_trap_damages_party() {
+        use crate::data::dungeon::TrapType;
+
+        let feature = CellFeatures {
+            trap: Some(TrapType::Pit {
+                damage: 5,
+                target_floor: None,
+            }),
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        // Spawn party members with known HP.
+        for _ in 0..4 {
+            let mut bundle = PartyMemberBundle::default();
+            bundle.derived_stats.current_hp = 10;
+            app.world_mut().spawn(bundle);
+        }
+        app.world_mut()
+            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        // All party members should have HP reduced from 10 to 5.
+        let hps: Vec<u32> = app
+            .world_mut()
+            .query_filtered::<&DerivedStats, With<PartyMember>>()
+            .iter(app.world())
+            .map(|d| d.current_hp)
+            .collect();
+        assert!(
+            !hps.is_empty(),
+            "party members should exist after pit trap test"
+        );
+        for hp in &hps {
+            assert_eq!(*hp, 5, "pit trap should subtract 5 damage from each member");
+        }
+    }
+
+    // --- pit_trap_with_target_floor_requests_teleport ---
+
+    #[test]
+    fn pit_trap_with_target_floor_requests_teleport() {
+        use crate::data::dungeon::TrapType;
+
+        let feature = CellFeatures {
+            trap: Some(TrapType::Pit {
+                damage: 1,
+                target_floor: Some(2),
+            }),
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        for _ in 0..4 {
+            app.world_mut().spawn(PartyMemberBundle::default());
+        }
+        app.world_mut()
+            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        let count = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<TeleportRequested>>()
+            .iter_current_update_messages()
+            .count();
+        assert_eq!(
+            count, 1,
+            "pit trap with target_floor should emit exactly one TeleportRequested"
+        );
+        let req = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<TeleportRequested>>()
+            .iter_current_update_messages()
+            .next()
+            .unwrap();
+        assert_eq!(req.target.floor, 2, "TeleportRequested target floor should be 2");
+    }
+
+    // --- poison_trap_applies_status ---
+
+    #[test]
+    fn poison_trap_applies_status() {
+        use crate::data::dungeon::TrapType;
+
+        let feature = CellFeatures {
+            trap: Some(TrapType::Poison),
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        for _ in 0..4 {
+            app.world_mut().spawn(PartyMemberBundle::default());
+        }
+        app.world_mut()
+            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        let poison_count: usize = app
+            .world_mut()
+            .query_filtered::<&StatusEffects, With<PartyMember>>()
+            .iter(app.world())
+            .map(|se| {
+                se.effects
+                    .iter()
+                    .filter(|e| e.effect_type == StatusEffectType::Poison)
+                    .count()
+            })
+            .sum();
+        assert!(
+            poison_count > 0,
+            "poison trap should apply Poison status to at least one party member"
+        );
+    }
+
+    // --- alarm_trap_publishes_encounter ---
+
+    #[test]
+    fn alarm_trap_publishes_encounter() {
+        use crate::data::dungeon::TrapType;
+
+        let feature = CellFeatures {
+            trap: Some(TrapType::Alarm),
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        app.world_mut()
+            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        let count = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<EncounterRequested>>()
+            .iter_current_update_messages()
+            .count();
+        assert_eq!(
+            count, 1,
+            "alarm trap should publish exactly one EncounterRequested"
+        );
+        let req = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<EncounterRequested>>()
+            .iter_current_update_messages()
+            .next()
+            .unwrap();
+        assert_eq!(
+            req.source,
+            EncounterSource::AlarmTrap,
+            "encounter source should be AlarmTrap"
+        );
+    }
+
+    // --- same_floor_teleport_mutates_in_place ---
+
+    #[test]
+    fn same_floor_teleport_mutates_in_place() {
+        use crate::data::dungeon::TeleportTarget;
+
+        // Build a 3x3 floor with a same-floor teleporter at (1,1) targeting (2,2).
+        let feature = CellFeatures {
+            teleporter: Some(TeleportTarget {
+                floor: 1, // same floor
+                x: 2,
+                y: 2,
+                facing: Some(Direction::South),
+            }),
+            ..Default::default()
+        };
+        let floor = DungeonFloor {
+            name: "test".into(),
+            width: 3,
+            height: 3,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default(); 3]; 3],
+            features: vec![
+                vec![CellFeatures::default(); 3],
+                vec![CellFeatures::default(), feature, CellFeatures::default()],
+                vec![CellFeatures::default(); 3],
+            ],
+            entry_point: (0, 0, Direction::North),
+            encounter_table: "test_table".into(),
+            lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, floor);
+
+        let party = app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 0, y: 0 },
+            Facing(Direction::North),
+            Transform::default(),
+        )).id();
+
+        // Write a MovedEvent targeting the teleporter cell at (1,1).
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 0, y: 0 },
+                to: GridPosition { x: 1, y: 1 },
+                facing: Direction::North,
+            });
+        app.update();
+
+        let pos = *app.world().entity(party).get::<GridPosition>().unwrap();
+        let facing = *app.world().entity(party).get::<Facing>().unwrap();
+        assert_eq!(
+            pos,
+            GridPosition { x: 2, y: 2 },
+            "teleporter should mutate GridPosition to destination"
+        );
+        assert_eq!(
+            facing.0,
+            Direction::South,
+            "teleporter should update facing when target.facing is Some"
+        );
+    }
+
+    // --- spinner_randomizes_facing_and_attaches_wobble ---
+
+    #[test]
+    fn spinner_randomizes_facing_and_attaches_wobble() {
+        let feature = CellFeatures {
+            spinner: true,
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        let party = app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::North),
+            Transform::default(),
+        )).id();
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        // Facing must have changed (spinner changes it to a non-no-op direction).
+        let facing = app.world().entity(party).get::<Facing>().unwrap().0;
+        assert_ne!(
+            facing,
+            Direction::North,
+            "spinner must change facing (no-op spin avoided)"
+        );
+        // ScreenWobble component must be attached.
+        assert!(
+            app.world().entity(party).contains::<ScreenWobble>(),
+            "spinner should attach ScreenWobble component"
+        );
+    }
+
+    // --- anti_magic_zone_lifecycle ---
+
+    #[test]
+    fn anti_magic_zone_lifecycle() {
+        // Build a 2x2 floor with anti_magic_zone at (1,0).
+        let floor = DungeonFloor {
+            name: "test".into(),
+            width: 2,
+            height: 2,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default(); 2]; 2],
+            features: vec![
+                vec![
+                    CellFeatures::default(),
+                    CellFeatures {
+                        anti_magic_zone: true,
+                        ..Default::default()
+                    },
+                ],
+                vec![CellFeatures::default(), CellFeatures::default()],
+            ],
+            entry_point: (0, 1, Direction::North),
+            encounter_table: "test_table".into(),
+            lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, floor);
+
+        let party = app
+            .world_mut()
+            .spawn((
+                PlayerParty,
+                GridPosition { x: 0, y: 1 },
+                Facing(Direction::North),
+                Transform::default(),
+            ))
+            .id();
+
+        // Step 1: move INTO anti_magic_zone at (1,0).
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 0, y: 1 },
+                to: GridPosition { x: 1, y: 0 },
+                facing: Direction::North,
+            });
+        app.update();
+
+        assert!(
+            app.world().entity(party).contains::<AntiMagicZone>(),
+            "AntiMagicZone component should be added on entry"
+        );
+
+        // Step 2: move OUT of anti_magic_zone back to (0,0).
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<MovedEvent>>()
+            .write(MovedEvent {
+                from: GridPosition { x: 1, y: 0 },
+                to: GridPosition { x: 0, y: 0 },
+                facing: Direction::West,
+            });
+        app.update();
+
+        assert!(
+            !app.world().entity(party).contains::<AntiMagicZone>(),
+            "AntiMagicZone component should be removed on exit"
+        );
+    }
+
+    // --- cross_floor_teleport_publishes_request ---
+
+    #[test]
+    fn cross_floor_teleport_publishes_request() {
+        use crate::data::dungeon::TeleportTarget;
+
+        // Build a 2x2 floor with a cross-floor teleporter at (1,1) targeting floor 2.
+        let feature = CellFeatures {
+            teleporter: Some(TeleportTarget {
+                floor: 2, // CROSS-FLOOR
+                x: 1,
+                y: 1,
+                facing: Some(Direction::South),
+            }),
+            ..Default::default()
+        };
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 0, y: 0 },
+            Facing(Direction::North),
+            Transform::default(),
+        ));
+
+        write_moved(&mut app, GridPosition { x: 1, y: 1 });
+        app.update();
+
+        let count = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<TeleportRequested>>()
+            .iter_current_update_messages()
+            .count();
+        assert_eq!(
+            count, 1,
+            "cross-floor teleporter should emit exactly one TeleportRequested"
+        );
+        let req = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<TeleportRequested>>()
+            .iter_current_update_messages()
+            .next()
+            .unwrap();
+        assert_eq!(
+            req.target.floor, 2,
+            "TeleportRequested target should be floor 2"
+        );
     }
 }
