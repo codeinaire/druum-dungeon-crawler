@@ -166,6 +166,9 @@ mod tests {
             sfx_encounter_sting: h.clone(),
             sfx_menu_click: h.clone(),
             sfx_attack_hit: h.clone(),
+            // Feature #13 additions:
+            sfx_spinner_whoosh: h.clone(),
+            sfx_door_close: h.clone(),
         });
         // When compiled with --features dev, StatePlugin::build registers
         // cycle_game_state_on_f9 which requires ButtonInput<KeyCode>. Insert

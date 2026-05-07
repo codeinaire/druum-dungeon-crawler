@@ -106,6 +106,7 @@
             weight: 0,
             value: 0,
             icon_path: "ui/icons/items/rusty_key.png",
+            key_id: Some("rusty_door_01"),  // Feature #13: unlocks LockedDoor at floor_01:(3,1) East
         ),
     ],
 )

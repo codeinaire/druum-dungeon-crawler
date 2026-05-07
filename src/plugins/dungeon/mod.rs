@@ -93,7 +93,7 @@ pub struct DungeonCamera;
 
 /// Logical grid position. Updated immediately on input-commit; the visual
 /// `Transform` catches up via `MovementAnimation`.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GridPosition {
     pub x: u32,
     pub y: u32,
@@ -200,14 +200,37 @@ pub struct MovedEvent {
 // Plugin
 // ---------------------------------------------------------------------------
 
+/// Which floor the player is currently exploring. Resolved on every
+/// `OnEnter(Dungeon)` from `PendingTeleport` (set by cross-floor teleport)
+/// or kept at the previous value (cold boot defaults to 1).
+///
+/// Read by every system that needs to look up the active `DungeonFloor`
+/// (`spawn_dungeon_geometry`, `handle_dungeon_input`, all `CellFeaturesPlugin`
+/// systems, the minimap subscriber, etc.). Replaces the ad-hoc
+/// `&assets.floor_01` access that previously hardcoded floor 1 everywhere.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveFloorNumber(pub u32);
+
+impl Default for ActiveFloorNumber {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
 pub struct DungeonPlugin;
 
 impl Plugin for DungeonPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MovedEvent>()
+            .init_resource::<ActiveFloorNumber>()
             .add_systems(
                 OnEnter(GameState::Dungeon),
-                (spawn_party_and_camera, spawn_dungeon_geometry),
+                (
+                    update_active_floor_from_pending,
+                    spawn_party_and_camera,
+                    spawn_dungeon_geometry,
+                )
+                    .chain(),
             )
             .add_systems(OnExit(GameState::Dungeon), despawn_dungeon_entities)
             .add_systems(
@@ -253,7 +276,7 @@ fn grid_to_world(pos: GridPosition) -> Vec3 {
 /// - `East  → -π/2` (clockwise 90° when viewed from above; turning right from North)
 /// - `South → π`
 /// - `West  → +π/2`
-fn facing_to_quat(facing: Direction) -> Quat {
+pub(crate) fn facing_to_quat(facing: Direction) -> Quat {
     use std::f32::consts::{FRAC_PI_2, PI};
     let angle = match facing {
         Direction::North => 0.0,
@@ -306,6 +329,51 @@ fn wall_material(
     }
 }
 
+/// Returns `true` if the player can move from cell `(pos.x, pos.y)` in direction `dir`,
+/// consulting both static `DungeonFloor::can_move` AND runtime `DoorStates`.
+///
+/// Truth table layered on `floor.can_move`:
+/// - `WallType::Door`: `DoorStates[(pos, dir)] == Some(Open)` → passable; else → blocked
+///   (default `DoorState::Closed`; D15 — closed-by-default). Pitfall 4: `floor.can_move`
+///   returns `true` for Door at the asset level — this wrapper overrides that.
+/// - `WallType::LockedDoor`: same — `DoorStates[(pos, dir)] == Some(Open)` → passable (unlocked
+///   via `handle_door_interact`). Pitfall 9: `floor.can_move` returns `false` for LockedDoor;
+///   the wrapper must return `true` when `DoorStates` says Open.
+/// - All other wall types: defer to `floor.can_move` (no DoorStates check).
+fn can_move_with_doors(
+    floor: &crate::data::DungeonFloor,
+    door_states: &crate::plugins::dungeon::features::DoorStates,
+    pos: GridPosition,
+    dir: Direction,
+) -> bool {
+    let cell = match floor
+        .walls
+        .get(pos.y as usize)
+        .and_then(|row| row.get(pos.x as usize))
+    {
+        Some(c) => c,
+        None => return false,
+    };
+    let wall = match dir {
+        Direction::North => cell.north,
+        Direction::South => cell.south,
+        Direction::East => cell.east,
+        Direction::West => cell.west,
+    };
+    use crate::plugins::dungeon::features::DoorState;
+    match wall {
+        WallType::Door | WallType::LockedDoor => {
+            let state = door_states
+                .doors
+                .get(&(pos, dir))
+                .copied()
+                .unwrap_or_default();
+            state == DoorState::Open
+        }
+        _ => floor.can_move(pos.x, pos.y, dir),
+    }
+}
+
 /// Two-sine flicker formula. Returns a multiplier to apply to base intensity.
 /// Theoretical peak amplitude is ±15% (sum of two sines at 0.10 + 0.05 weights),
 /// but clamped to `[0.80, 1.20]` defensively (Feature #9 research §Pitfall 5 —
@@ -314,6 +382,48 @@ fn flicker_factor(t: f32, phase: f32) -> f32 {
     let s1 = bevy::math::ops::sin(t * 6.4 + phase);
     let s2 = bevy::math::ops::sin(t * 23.0 + phase * 1.7);
     (1.0 + 0.10 * s1 + 0.05 * s2).clamp(0.80, 1.20)
+}
+
+/// Returns the `DungeonFloor` handle for `floor_number` from `DungeonAssets`.
+/// Falls back to `floor_01` for unknown floor numbers and emits a warning.
+/// Feature #13 Phase 8 (D11-A): floor_02 is the only additional floor in v1;
+/// future floors follow the same match arm pattern.
+pub(crate) fn floor_handle_for(assets: &DungeonAssets, floor_number: u32) -> &Handle<DungeonFloor> {
+    match floor_number {
+        1 => &assets.floor_01,
+        2 => &assets.floor_02,
+        n => {
+            warn!("No DungeonFloor handle for floor {n}; falling back to floor_01");
+            &assets.floor_01
+        }
+    }
+}
+
+/// Resolve the active floor number on every `OnEnter(Dungeon)`. Reads the
+/// current `PendingTeleport` (set by cross-floor teleport) without consuming
+/// it — `spawn_party_and_camera` is the authoritative consumer that calls
+/// `.take()`. If no teleport is in flight, retain the previous value (cold
+/// boot defaults to 1 via `ActiveFloorNumber::default`).
+///
+/// Chained `.before()` `spawn_party_and_camera` and `spawn_dungeon_geometry`
+/// in `DungeonPlugin::build`.
+pub(crate) fn update_active_floor_from_pending(
+    pending: Option<Res<crate::plugins::dungeon::features::PendingTeleport>>,
+    mut active: ResMut<ActiveFloorNumber>,
+) {
+    let Some(pt) = pending else {
+        return;
+    };
+    let Some(target) = pt.target.as_ref() else {
+        return;
+    };
+    if active.0 != target.floor {
+        info!(
+            "Active floor {} → {} via PendingTeleport",
+            active.0, target.floor
+        );
+        active.0 = target.floor;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,17 +446,51 @@ fn spawn_party_and_camera(
     mut commands: Commands,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
+    mut pending_teleport: Option<ResMut<crate::plugins::dungeon::features::PendingTeleport>>,
 ) {
     let Some(assets) = dungeon_assets else {
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); party spawn deferred");
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
-        warn!("DungeonFloor not yet loaded; party spawn deferred");
+
+    // Feature #13 cross-floor teleport (D3-α + D11-A):
+    // Floor is resolved from `ActiveFloorNumber` (set by
+    // `update_active_floor_from_pending`, which ran .chain()'d before us).
+    // We still consume `PendingTeleport.target` here for the entry coordinates
+    // — it's the authoritative single-consumer.
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
+        warn!(
+            "DungeonFloor for floor {} not yet loaded; party spawn deferred",
+            active_floor.0
+        );
         return;
     };
 
-    let (sx, sy, facing) = floor.entry_point;
+    // Override entry_point if teleport target is set; clear after use.
+    // Validate target coordinates against the destination floor — pit traps
+    // reuse the SOURCE cell's (x, y) on the destination floor, which can
+    // land outside a smaller destination's grid (e.g., source (4, 4) on a
+    // 4×4 destination has valid indices 0..=3). Out-of-bounds → fall back
+    // to entry_point so the player can never spawn in the void.
+    let (sx, sy, facing) = if let Some(ref mut pt) = pending_teleport
+        && let Some(target) = pt.target.take()
+    {
+        if target.x < floor.width && target.y < floor.height {
+            let facing = target.facing.unwrap_or(floor.entry_point.2);
+            (target.x, target.y, facing)
+        } else {
+            warn!(
+                "Teleport target ({}, {}) is out of bounds for floor {} \
+                 ({}×{}); falling back to entry_point {:?}",
+                target.x, target.y, active_floor.0, floor.width, floor.height, floor.entry_point
+            );
+            floor.entry_point
+        }
+    } else {
+        floor.entry_point
+    };
     let start_pos = GridPosition { x: sx, y: sy };
     let world_pos = grid_to_world(start_pos);
     let initial_rotation = facing_to_quat(facing);
@@ -445,14 +589,19 @@ fn spawn_dungeon_geometry(
     mut materials: ResMut<Assets<StandardMaterial>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
 ) {
     // Asset-tolerant: same pattern as spawn_party_and_camera.
     let Some(assets) = dungeon_assets else {
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); geometry spawn deferred");
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
-        warn!("DungeonFloor not yet loaded; geometry spawn deferred");
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
+        warn!(
+            "DungeonFloor for floor {} not yet loaded; geometry spawn deferred",
+            active_floor.0
+        );
         return;
     };
 
@@ -615,11 +764,14 @@ fn spawn_dungeon_geometry(
 /// coupling would silently break). If you remove `pub(crate)`, `minimap.rs`
 /// will produce a compile error on the `.after(...)` ordering call.
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_dungeon_input(
     mut commands: Commands,
     actions: Res<ActionState<DungeonAction>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
+    door_states: Res<crate::plugins::dungeon::features::DoorStates>, // Feature #13 D9b
     mut sfx: MessageWriter<SfxRequest>,
     mut moved: MessageWriter<MovedEvent>,
     mut query: Query<
@@ -634,7 +786,8 @@ pub(crate) fn handle_dungeon_input(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
 
@@ -663,7 +816,8 @@ pub(crate) fn handle_dungeon_input(
         }
 
         // Passability check: wall-bumps are silent no-ops.
-        if !floor.can_move(pos.x, pos.y, move_dir) {
+        // Feature #13 D9b: consult DoorStates for Door/LockedDoor passability.
+        if !can_move_with_doors(floor, &door_states, *pos, move_dir) {
             return;
         }
 
@@ -674,10 +828,17 @@ pub(crate) fn handle_dungeon_input(
         let from_translation = grid_to_world(old_pos);
         let to_translation = grid_to_world(*pos);
 
+        // Use the canonical facing rotation, NOT `transform.rotation`. If a
+        // wobble or other rotation perturbation is in flight, capturing the
+        // current visible rotation would lock that perturbation into the
+        // translation animation's from/to (which are equal — translate doesn't
+        // tween rotation), permanently baking the tilt into the camera until
+        // the next Q/E press. The canonical rotation here lets translate
+        // re-assert upright as soon as a wobble ends.
         commands.entity(entity).insert(MovementAnimation::translate(
             from_translation,
             to_translation,
-            transform.rotation,
+            facing_to_quat(facing.0),
         ));
 
         sfx.write(SfxRequest {
@@ -819,6 +980,7 @@ fn spawn_debug_grid_hud(mut commands: Commands) {
 #[cfg(feature = "dev")]
 fn update_debug_grid_hud(
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut hud: Query<&mut Text, With<DebugGridHud>>,
 ) {
     let Ok((pos, facing)) = party.single() else {
@@ -827,7 +989,10 @@ fn update_debug_grid_hud(
     let Ok(mut text) = hud.single_mut() else {
         return;
     };
-    text.0 = format!("Position: ({}, {}) | Facing: {:?}", pos.x, pos.y, facing.0);
+    text.0 = format!(
+        "Floor {} | Position: ({}, {}) | Facing: {:?}",
+        active_floor.0, pos.x, pos.y, facing.0
+    );
 }
 
 /// `OnExit(GameState::Dungeon)` (dev-only) — despawn the HUD overlay.
@@ -841,6 +1006,8 @@ fn despawn_debug_grid_hud(mut commands: Commands, hud: Query<Entity, With<DebugG
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+pub mod features;
 
 #[cfg(test)]
 mod tests;

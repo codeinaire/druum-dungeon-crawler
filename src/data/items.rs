@@ -110,6 +110,11 @@ pub struct ItemAsset {
     /// punts stackable logic. Each potion is a unique entity in v1.
     #[serde(default)]
     pub stackable: bool,
+    /// Optional key identifier — only meaningful when `kind == ItemKind::KeyItem`.
+    /// Read by Feature #13's `handle_door_interact` when the player presses
+    /// Interact against a `WallType::LockedDoor`. Default `None` for non-key items.
+    #[serde(default)]
+    pub key_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -167,6 +172,7 @@ mod tests {
             value: 10,
             icon_path: "assets/ui/icons/items/rusty_sword.png".to_string(),
             stackable: false,
+            ..Default::default()
         };
 
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
@@ -193,6 +199,7 @@ mod tests {
                     value: 10,
                     icon_path: String::new(),
                     stackable: false,
+                    ..Default::default()
                 },
                 ItemAsset {
                     id: "healing_potion".to_string(),
@@ -204,6 +211,7 @@ mod tests {
                     value: 50,
                     icon_path: String::new(),
                     stackable: false,
+                    ..Default::default()
                 },
             ],
         };
@@ -227,6 +235,25 @@ mod tests {
         );
     }
 
+    /// Round-trip an `ItemAsset` with a `key_id` set through RON.
+    /// Verifies the new `#[serde(default)]` field survives serialization/deserialization.
+    #[test]
+    fn item_asset_round_trips_with_key_id() {
+        let original = ItemAsset {
+            id: "rusty_key".into(),
+            display_name: "Rusty Key".into(),
+            kind: ItemKind::KeyItem,
+            slot: EquipSlot::None,
+            key_id: Some("rusty_door_01".into()),
+            ..Default::default()
+        };
+        let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
+            .expect("ItemAsset should serialize");
+        let parsed: ItemAsset =
+            ron::de::from_str(&serialized).expect("ItemAsset should round-trip");
+        assert_eq!(parsed, original);
+    }
+
     /// `ItemDb::get` returns `Some` for an authored item and `None` for a
     /// missing one.
     #[test]
@@ -245,6 +272,7 @@ mod tests {
                 value: 10,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             }],
         };
 

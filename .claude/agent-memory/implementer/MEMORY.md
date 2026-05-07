@@ -17,3 +17,6 @@
 - [bevy_egui 0.39.x — painters must use EguiPrimaryContextPass, not Update](feedback_bevy_egui_primary_context_pass.md) — EguiContexts::ctx_mut() returns Result; EguiPlugin::default(); Frame::NONE/Frame::new() replaces deprecated Frame::none()
 - [bevy::utils::HashMap removed in Bevy 0.18.1](feedback_bevy_utils_hashmap_removed.md) — Use std::collections::HashMap; bevy::utils::HashMap no longer exists
 - [leafwing ActionState tests — press/update/release/update for just_pressed](feedback_leafwing_actionstate_test_timing.md) — Exclude ActionsPlugin (mouse panic); init ActionState via init_resource; use press/update/release/update to avoid double-firing
+- [--features dev party spawn before advance_into_dungeon](feedback_dev_party_spawn_before_advance.md) — Spawn test PartyMember entities BEFORE advance_into_dungeon or spawn_default_debug_party contaminates PartyMember queries with HP=0 members
+- [Bevy B0002 MessageWriter<T> vs MessageReader<T>](feedback_bevy_b0002_message_writer_reader.md) — MessageWriter (exclusive ResMut) conflicts with MessageReader (shared Res) even with .chain(); mutate state directly instead of re-publishing
+- [CellFeaturesPlugin required in all DungeonPlugin test apps](feedback_cellfeaturesPlugin_test_harness.md) — Post-Feature-#13, DungeonPlugin tests need CellFeaturesPlugin + PartyPlugin + init_asset::<ItemDb>()

@@ -1,0 +1,64 @@
+// Floor 2 — minimal stub for Feature #13 cross-floor teleport testing.
+// 4×4 grid; single room; entry at (1,1) facing South.
+// No CellFeatures (clean test target — the player teleports here from
+// floor 1's (5,4) and lands cleanly).
+//
+// Layout (x increases rightward, y increases downward):
+//
+//   x:   0     1     2     3
+// y=0: [SSS] [S_S] [S_S] [SSS]   <- top outer edge
+// y=1: [S_+] [+_S] [S_S] [SSS]   <- entry=+ at (1,1)
+// y=2: [S_S] [S_S] [S_S] [SSS]   <- interior
+// y=3: [SSS] [SSS] [SSS] [SSS]   <- bottom outer edge (all Solid)
+//
+// Locked-door ids: (none)
+
+(
+    name: "Test Floor 2",
+    width: 4,
+    height: 4,
+    floor_number: 2,
+    walls: [
+        // Row y=0: top outer edge — all Solid
+        [
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            (north: Solid, south: Open,  east: Solid, west: Solid),
+            (north: Solid, south: Open,  east: Solid, west: Solid),
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+        ],
+        // Row y=1: entry point at (1,1)
+        [
+            (north: Solid, south: Open, east: Open,  west: Solid),
+            (north: Open,  south: Open, east: Open,  west: Open),
+            (north: Open,  south: Open, east: Solid, west: Open),
+            (north: Solid, south: Open, east: Solid, west: Solid),
+        ],
+        // Row y=2: interior
+        [
+            (north: Open,  south: Solid, east: Open,  west: Solid),
+            (north: Open,  south: Solid, east: Open,  west: Open),
+            (north: Open,  south: Solid, east: Solid, west: Open),
+            (north: Open,  south: Solid, east: Solid, west: Solid),
+        ],
+        // Row y=3: bottom outer edge
+        [
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+            (north: Solid, south: Solid, east: Solid, west: Solid),
+        ],
+    ],
+    features: [
+        [(), (), (), ()],
+        [(), (), (), ()],
+        [(), (), (), ()],
+        [(), (), (), ()],
+    ],
+    entry_point: (1, 1, South),
+    encounter_table: "test_table",
+    lighting: (
+        fog: (color: (0.10, 0.09, 0.08), density: 0.12),
+        ambient_brightness: 1.0,
+    ),
+    locked_doors: [],
+)

@@ -6,7 +6,9 @@ use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use leafwing_input_manager::user_input::Buttonlike;
 
+use crate::plugins::dungeon::features::CellFeaturesPlugin;
 use crate::plugins::input::ActionsPlugin;
+use crate::plugins::party::PartyPlugin;
 use crate::plugins::state::StatePlugin;
 
 // -----------------------------------------------------------------------
@@ -157,8 +159,11 @@ fn make_test_app() -> App {
         StatePlugin,
         ActionsPlugin,
         DungeonPlugin,
+        CellFeaturesPlugin,
+        PartyPlugin,
     ));
     app.init_asset::<DungeonFloor>();
+    app.init_asset::<crate::data::ItemDb>();
     // Init mesh and material asset registries so spawn_test_scene's
     // ResMut<Assets<Mesh>> and ResMut<Assets<StandardMaterial>> parameters
     // are satisfied without the full PbrPlugin chain.
@@ -193,6 +198,7 @@ fn make_open_floor(w: u32, h: u32) -> DungeonFloor {
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
         lighting: LightingConfig::default(),
+        locked_doors: Vec::new(),
     }
 }
 
@@ -206,6 +212,7 @@ fn insert_test_floor(app: &mut App, floor: DungeonFloor) {
         .add(floor);
     app.world_mut().insert_resource(DungeonAssets {
         floor_01: handle,
+        floor_02: Handle::default(),
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),
@@ -449,6 +456,7 @@ fn handle_dungeon_input_drops_input_during_animation() {
             entry_point: (2, 2, Direction::North),
             encounter_table: "test_table".into(),
             lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
         };
         insert_test_floor(&mut app, floor);
     }
@@ -571,6 +579,7 @@ fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
         lighting: LightingConfig::default(),
+        locked_doors: Vec::new(),
     }
 }
 
@@ -759,5 +768,103 @@ fn flicker_torches_modulates_carried_torch_intensity() {
     assert_ne!(
         intensity, 60_000.0,
         "Torch intensity should not be exactly base_intensity after a non-zero tick"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Feature #13 — can_move_with_doors wrapper tests (Phase 6)
+// ---------------------------------------------------------------------------
+
+/// Default empty DoorStates + WallType::Door east of (0,0) → blocked.
+/// Pitfall 4: floor.can_move returns true for Door at the asset level;
+/// the wrapper overrides with DoorState::Closed (the default) → false.
+#[test]
+fn can_move_with_doors_blocks_closed_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::DoorStates;
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::Door;
+
+    let door_states = DoorStates::default(); // empty — all default Closed
+    let pos = GridPosition { x: 0, y: 0 };
+    assert!(
+        !super::can_move_with_doors(&floor, &door_states, pos, Direction::East),
+        "Default DoorState::Closed should block WallType::Door (Pitfall 4)"
+    );
+}
+
+/// DoorStates[(0,0) East] = Open + WallType::Door → passable.
+#[test]
+fn can_move_with_doors_passes_open_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::{DoorState, DoorStates};
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::Door;
+
+    let mut door_states = DoorStates::default();
+    door_states.doors.insert(
+        (GridPosition { x: 0, y: 0 }, Direction::East),
+        DoorState::Open,
+    );
+    assert!(
+        super::can_move_with_doors(
+            &floor,
+            &door_states,
+            GridPosition { x: 0, y: 0 },
+            Direction::East
+        ),
+        "DoorState::Open allows passage of WallType::Door"
+    );
+}
+
+/// Default empty DoorStates + WallType::LockedDoor east of (0,0) → blocked.
+/// Pitfall 9: LockedDoor's `floor.can_move` returns false; the wrapper must
+/// honor that for default-Closed (no override yet).
+#[test]
+fn can_move_with_doors_blocks_closed_locked_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::DoorStates;
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::LockedDoor;
+
+    let door_states = DoorStates::default();
+    assert!(
+        !super::can_move_with_doors(
+            &floor,
+            &door_states,
+            GridPosition { x: 0, y: 0 },
+            Direction::East
+        ),
+        "Default DoorState::Closed should block WallType::LockedDoor"
+    );
+}
+
+/// DoorStates[(0,0) East] = Open + WallType::LockedDoor → passable.
+/// Pitfall 9: LockedDoor's `floor.can_move` returns false; the wrapper MUST
+/// override that when DoorStates says Open (post-unlock via handle_door_interact).
+#[test]
+fn can_move_with_doors_passes_unlocked_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::{DoorState, DoorStates};
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::LockedDoor;
+
+    let mut door_states = DoorStates::default();
+    door_states.doors.insert(
+        (GridPosition { x: 0, y: 0 }, Direction::East),
+        DoorState::Open,
+    );
+    assert!(
+        super::can_move_with_doors(
+            &floor,
+            &door_states,
+            GridPosition { x: 0, y: 0 },
+            Direction::East
+        ),
+        "DoorState::Open must override floor.can_move=false for WallType::LockedDoor (Pitfall 9)"
     );
 }

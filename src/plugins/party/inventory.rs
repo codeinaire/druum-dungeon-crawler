@@ -676,6 +676,7 @@ mod tests {
                 value: 50,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
         // Spawn the item entity directly so it's queryable via ItemInstance.
@@ -737,6 +738,7 @@ mod tests {
                 value: 10,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
         let item_entity = world.spawn(ItemInstance(sword_handle.clone())).id();
@@ -826,6 +828,7 @@ mod app_tests {
                 value: 1,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 
@@ -897,6 +900,7 @@ mod app_tests {
                 value: 0,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 
@@ -964,6 +968,7 @@ mod app_tests {
                 value: 10,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 
@@ -1021,6 +1026,7 @@ mod app_tests {
                 value: 0,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 
@@ -1109,6 +1115,7 @@ mod app_tests {
                 value: 0,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
         let second_handle = {
@@ -1123,6 +1130,7 @@ mod app_tests {
                 value: 0,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 
@@ -1221,6 +1229,7 @@ mod app_tests {
                 value: 0,
                 icon_path: String::new(),
                 stackable: false,
+                ..Default::default()
             })
         };
 

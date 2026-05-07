@@ -14,6 +14,7 @@ use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
 use crate::data::{ClassTable, DungeonFloor, EnemyDb, ItemDb, SpellTable};
+use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
 /// Resource populated by `bevy_asset_loader` once all collection handles
@@ -30,6 +31,9 @@ use crate::plugins::state::GameState;
 pub struct DungeonAssets {
     #[asset(path = "dungeons/floor_01.dungeon.ron")]
     pub floor_01: Handle<DungeonFloor>,
+    // Feature #13 — minimal floor for cross-floor teleport testing (D11-A):
+    #[asset(path = "dungeons/floor_02.dungeon.ron")]
+    pub floor_02: Handle<DungeonFloor>,
     #[asset(path = "items/core.items.ron")]
     pub item_db: Handle<ItemDb>,
     #[asset(path = "enemies/core.enemies.ron")]
@@ -73,6 +77,11 @@ pub struct AudioAssets {
     pub sfx_menu_click: Handle<AudioSource>,
     #[asset(path = "audio/sfx/attack_hit.ogg")]
     pub sfx_attack_hit: Handle<AudioSource>,
+    // Feature #13 additions:
+    #[asset(path = "audio/sfx/spinner_whoosh.ogg")]
+    pub sfx_spinner_whoosh: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/door_close.ogg")]
+    pub sfx_door_close: Handle<AudioSource>,
 }
 
 /// Marker tag on every entity spawned by `spawn_loading_screen`.
@@ -114,7 +123,60 @@ impl Plugin for LoadingPlugin {
             //     are spawned on OnEnter(Loading) and despawned on
             //     OnExit(Loading) — both tagged LoadingScreenRoot.
             .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
-            .add_systems(OnExit(GameState::Loading), despawn_loading_screen);
+            .add_systems(OnExit(GameState::Loading), despawn_loading_screen)
+            // Feature #13 cross-floor teleport (D3-α):
+            .add_systems(
+                Update,
+                handle_teleport_request.run_if(in_state(GameState::Dungeon)),
+            )
+            // Feature #13 cross-floor teleport (D3-α): bevy_asset_loader's
+            // `continue_to_state(TitleScreen)` is fired on every Loading
+            // completion. When the player teleports cross-floor, we re-enter
+            // Loading with `PendingTeleport.target = Some(_)`. Without this
+            // redirect, the player lands on TitleScreen instead of Dungeon.
+            .add_systems(
+                OnEnter(GameState::TitleScreen),
+                redirect_to_dungeon_if_pending,
+            );
+    }
+}
+
+/// Consumes `TeleportRequested` and triggers a re-entry into
+/// `GameState::Loading -> GameState::Dungeon` with the destination stashed
+/// in `PendingTeleport`. The next `OnEnter(Dungeon)` reads the destination
+/// and overrides `floor.entry_point`.
+///
+/// Runs in `Update` while in `GameState::Dungeon`. Reading `requests.read().last()`
+/// collapses multiple same-frame requests to the most recent (e.g., walking
+/// into a chain of teleporters in one tick — last writer wins).
+fn handle_teleport_request(
+    mut requests: MessageReader<TeleportRequested>,
+    mut pending: ResMut<PendingTeleport>,
+    mut next: ResMut<NextState<GameState>>,
+) {
+    if let Some(req) = requests.read().last() {
+        pending.target = Some(req.target.clone());
+        next.set(GameState::Loading);
+        info!(
+            "Teleport requested to floor {} at ({}, {})",
+            req.target.floor, req.target.x, req.target.y
+        );
+    }
+}
+
+/// Redirect `Loading -> TitleScreen -> Dungeon` when `PendingTeleport` is set.
+/// `bevy_asset_loader::continue_to_state(TitleScreen)` is configured statically,
+/// so every Loading completion lands on TitleScreen. This system runs on
+/// `OnEnter(TitleScreen)` and queues a transition back to Dungeon if a teleport
+/// is in flight. Briefly traverses TitleScreen for a single frame; the title-screen
+/// UI render is sub-frame and not user-visible at typical frame rates.
+fn redirect_to_dungeon_if_pending(
+    pending: Res<PendingTeleport>,
+    mut next: ResMut<NextState<GameState>>,
+) {
+    if pending.target.is_some() {
+        next.set(GameState::Dungeon);
+        info!("Loading complete with PendingTeleport set; redirecting to Dungeon");
     }
 }
 
@@ -154,5 +216,71 @@ fn spawn_loading_screen(mut commands: Commands) {
 fn despawn_loading_screen(mut commands: Commands, roots: Query<Entity, With<LoadingScreenRoot>>) {
     for e in &roots {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::dungeon::TeleportTarget;
+    use bevy::state::app::StatesPlugin;
+
+    fn make_redirect_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin));
+        app.init_state::<GameState>();
+        app.init_resource::<PendingTeleport>();
+        app.add_systems(
+            OnEnter(GameState::TitleScreen),
+            redirect_to_dungeon_if_pending,
+        );
+        app
+    }
+
+    /// Pending teleport set + transition into TitleScreen → redirect to Dungeon.
+    /// This is the regression test for Defect B (review): without the redirect,
+    /// `bevy_asset_loader::continue_to_state(TitleScreen)` strands the player
+    /// on the title screen after a cross-floor teleport.
+    #[test]
+    fn redirect_fires_when_pending_teleport_set() {
+        let mut app = make_redirect_app();
+
+        app.world_mut().resource_mut::<PendingTeleport>().target = Some(TeleportTarget {
+            floor: 2,
+            x: 1,
+            y: 1,
+            facing: None,
+        });
+
+        // Loading → TitleScreen (simulates bevy_asset_loader's transition).
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::TitleScreen);
+        app.update(); // realize TitleScreen + run OnEnter(TitleScreen) systems
+        app.update(); // realize the queued Dungeon transition
+
+        assert_eq!(
+            *app.world().resource::<State<GameState>>().get(),
+            GameState::Dungeon,
+            "redirect_to_dungeon_if_pending should re-route TitleScreen → Dungeon"
+        );
+    }
+
+    /// No pending teleport → stay on TitleScreen (cold-boot path is unaffected).
+    #[test]
+    fn redirect_no_op_when_pending_teleport_unset() {
+        let mut app = make_redirect_app();
+
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::TitleScreen);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<GameState>>().get(),
+            GameState::TitleScreen,
+            "without PendingTeleport, the redirect must be a no-op"
+        );
     }
 }
