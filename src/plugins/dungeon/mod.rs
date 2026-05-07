@@ -469,11 +469,23 @@ fn spawn_party_and_camera(
     };
 
     // Override entry_point if teleport target is set; clear after use.
-    let (sx, sy, facing) = if let Some(ref mut pt) = pending_teleport {
-        if let Some(target) = pt.target.take() {
+    // Validate target coordinates against the destination floor — pit traps
+    // reuse the SOURCE cell's (x, y) on the destination floor, which can
+    // land outside a smaller destination's grid (e.g., source (4, 4) on a
+    // 4×4 destination has valid indices 0..=3). Out-of-bounds → fall back
+    // to entry_point so the player can never spawn in the void.
+    let (sx, sy, facing) = if let Some(ref mut pt) = pending_teleport
+        && let Some(target) = pt.target.take()
+    {
+        if target.x < floor.width && target.y < floor.height {
             let facing = target.facing.unwrap_or(floor.entry_point.2);
             (target.x, target.y, facing)
         } else {
+            warn!(
+                "Teleport target ({}, {}) is out of bounds for floor {} \
+                 ({}×{}); falling back to entry_point {:?}",
+                target.x, target.y, active_floor.0, floor.width, floor.height, floor.entry_point
+            );
             floor.entry_point
         }
     } else {
