@@ -197,16 +197,22 @@ impl Plugin for CellFeaturesPlugin {
 
 /// Diagnostic — logs whenever the physical `KeyF` key is just-pressed,
 /// alongside the current `GameState` and leafwing's `ActionState<Interact>`.
-/// Helps locate why `handle_door_interact` may not fire: if this logs but
-/// `handle_door_interact` does not, the `run_if(in_state(Dungeon))` gate or
-/// the leafwing translation is at fault. If this does NOT log, the keyboard
-/// input pipeline is broken (e.g. window has no focus).
+/// Uses both `info!` (tracing) and `eprintln!` (raw stderr) to bypass any
+/// LogPlugin filter or stdout-capture issue. Also dumps every just-pressed
+/// key on every frame to verify the keyboard pipeline works at all — this
+/// will get noisy as soon as you press anything but tells us if input is alive.
 #[allow(clippy::needless_pass_by_value)]
 fn debug_log_f_keypress(
     keys: Res<ButtonInput<KeyCode>>,
     actions: Option<Res<ActionState<DungeonAction>>>,
     state: Res<State<GameState>>,
 ) {
+    // Mirror every just-pressed key to stderr. This proves the input
+    // pipeline is alive even if KeyF specifically isn't reaching us.
+    let pressed_now: Vec<KeyCode> = keys.get_just_pressed().copied().collect();
+    if !pressed_now.is_empty() {
+        eprintln!("[DRUUM-DIAG] just_pressed keys this frame: {:?}", pressed_now);
+    }
     if keys.just_pressed(KeyCode::KeyF) {
         let interact_just_pressed = actions
             .as_deref()
@@ -216,6 +222,13 @@ fn debug_log_f_keypress(
             .as_deref()
             .map(|a| a.pressed(&DungeonAction::Interact))
             .unwrap_or(false);
+        eprintln!(
+            "[DRUUM-DIAG] F just_pressed: GameState={:?} Interact::just_pressed={} pressed={} action_state={}",
+            state.get(),
+            interact_just_pressed,
+            interact_pressed,
+            actions.is_some(),
+        );
         info!(
             "F key just_pressed: GameState={:?}, ActionState<Interact>::just_pressed={}, pressed={}, action_state_present={}",
             state.get(),
