@@ -24,8 +24,8 @@ use crate::data::ItemAsset;
 use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::dungeon::{
-    Facing, GridPosition, MovedEvent, PlayerParty, animate_movement, handle_dungeon_input,
-    spawn_party_and_camera,
+    ActiveFloorNumber, Facing, GridPosition, MovedEvent, PlayerParty, animate_movement,
+    floor_handle_for, handle_dungeon_input, update_active_floor_from_pending,
 };
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
@@ -149,10 +149,10 @@ impl Plugin for CellFeaturesPlugin {
             .add_message::<EncounterRequested>()
             .add_systems(
                 OnEnter(GameState::Dungeon),
-                // .before(spawn_party_and_camera) is intentional:
-                // spawn_party_and_camera calls `pt.target.take()`, so populate
-                // must peek at the floor number BEFORE that take() clears it.
-                populate_locked_doors.before(spawn_party_and_camera),
+                // .after(update_active_floor_from_pending) ensures the
+                // ActiveFloorNumber resource has been refreshed from
+                // PendingTeleport before populate reads it.
+                populate_locked_doors.after(update_active_floor_from_pending),
             )
             .add_systems(OnExit(GameState::Dungeon), clear_door_resources)
             .add_systems(
@@ -183,64 +183,13 @@ impl Plugin for CellFeaturesPlugin {
                         .run_if(in_state(GameState::Dungeon))
                         .after(animate_movement), // win the rotation race (Risk register)
                 ),
-            )
-            // DIAGNOSTIC — runs in every state, not gated. Logs whenever the
-            // F key is just-pressed, regardless of GameState or leafwing
-            // translation. Helps diagnose why handle_door_interact may not fire.
-            .add_systems(Update, debug_log_f_keypress);
+            );
     }
 }
 
 // ---------------------------------------------------------------------------
 // Systems — diagnostic
 // ---------------------------------------------------------------------------
-
-/// Diagnostic — logs whenever the physical `KeyF` key is just-pressed,
-/// alongside the current `GameState` and leafwing's `ActionState<Interact>`.
-/// Uses both `info!` (tracing) and `eprintln!` (raw stderr) to bypass any
-/// LogPlugin filter or stdout-capture issue. Also dumps every just-pressed
-/// key on every frame to verify the keyboard pipeline works at all — this
-/// will get noisy as soon as you press anything but tells us if input is alive.
-#[allow(clippy::needless_pass_by_value)]
-fn debug_log_f_keypress(
-    keys: Res<ButtonInput<KeyCode>>,
-    actions: Option<Res<ActionState<DungeonAction>>>,
-    state: Res<State<GameState>>,
-) {
-    // Mirror every just-pressed key to stderr. This proves the input
-    // pipeline is alive even if KeyF specifically isn't reaching us.
-    let pressed_now: Vec<KeyCode> = keys.get_just_pressed().copied().collect();
-    if !pressed_now.is_empty() {
-        eprintln!(
-            "[DRUUM-DIAG] just_pressed keys this frame: {:?}",
-            pressed_now
-        );
-    }
-    if keys.just_pressed(KeyCode::KeyF) {
-        let interact_just_pressed = actions
-            .as_deref()
-            .map(|a| a.just_pressed(&DungeonAction::Interact))
-            .unwrap_or(false);
-        let interact_pressed = actions
-            .as_deref()
-            .map(|a| a.pressed(&DungeonAction::Interact))
-            .unwrap_or(false);
-        eprintln!(
-            "[DRUUM-DIAG] F just_pressed: GameState={:?} Interact::just_pressed={} pressed={} action_state={}",
-            state.get(),
-            interact_just_pressed,
-            interact_pressed,
-            actions.is_some(),
-        );
-        info!(
-            "F key just_pressed: GameState={:?}, ActionState<Interact>::just_pressed={}, pressed={}, action_state_present={}",
-            state.get(),
-            interact_just_pressed,
-            interact_pressed,
-            actions.is_some(),
-        );
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Systems — state management
@@ -253,22 +202,13 @@ fn populate_locked_doors(
     mut locked_doors: ResMut<LockedDoors>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
-    pending_teleport: Option<Res<PendingTeleport>>,
+    active_floor: Res<ActiveFloorNumber>,
 ) {
     locked_doors.by_edge.clear();
     let Some(assets) = dungeon_assets else {
         return;
     };
-    // Read-only peek at the active floor number. This system is ordered
-    // .before(spawn_party_and_camera) so that spawn's `pt.target.take()`
-    // hasn't fired yet — the target is still Some(_) for cross-floor
-    // teleports. Falls back to floor 1 when no teleport is in flight
-    // (initial dungeon entry).
-    let active_floor_number = pending_teleport
-        .as_ref()
-        .and_then(|pt| pt.target.as_ref().map(|t| t.floor))
-        .unwrap_or(1);
-    let floor_handle = crate::plugins::dungeon::floor_handle_for(&assets, active_floor_number);
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
     let Some(floor) = floors.get(floor_handle) else {
         return;
     };
@@ -309,6 +249,7 @@ fn handle_door_interact(
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     locked_doors: Res<LockedDoors>,
     mut door_states: ResMut<DoorStates>,
     inventory: Query<&Inventory, With<PartyMember>>,
@@ -330,10 +271,11 @@ fn handle_door_interact(
         );
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         info!(
-            "Interact pressed at {:?} facing {:?} but floor_01 not yet loaded",
-            pos, facing.0
+            "Interact pressed at {:?} facing {:?} but floor {} not yet loaded",
+            pos, facing.0, active_floor.0
         );
         return;
     };
@@ -425,6 +367,7 @@ fn apply_pit_trap(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut party: Query<&mut DerivedStats, With<PartyMember>>,
     mut sfx: MessageWriter<SfxRequest>,
     mut teleport: MessageWriter<TeleportRequested>,
@@ -432,7 +375,8 @@ fn apply_pit_trap(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     for ev in moved.read() {
@@ -469,6 +413,7 @@ fn apply_poison_trap(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut party: Query<&mut StatusEffects, With<PartyMember>>,
     mut sfx: MessageWriter<SfxRequest>,
 ) {
@@ -476,7 +421,8 @@ fn apply_poison_trap(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     for ev in moved.read() {
@@ -502,13 +448,15 @@ fn apply_alarm_trap(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut encounter: MessageWriter<EncounterRequested>,
     mut sfx: MessageWriter<SfxRequest>,
 ) {
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     for ev in moved.read() {
@@ -538,6 +486,7 @@ fn apply_teleporter(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut party: Query<(&mut GridPosition, &mut Facing, &mut Transform), With<PlayerParty>>,
     mut teleport: MessageWriter<TeleportRequested>,
     mut sfx: MessageWriter<SfxRequest>,
@@ -545,7 +494,8 @@ fn apply_teleporter(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     let Ok((mut pos, mut facing, mut transform)) = party.single_mut() else {
@@ -581,10 +531,12 @@ fn apply_teleporter(
 
 /// Spinner — pick a random direction (D14 fallback: `Time::elapsed_secs_f64`
 /// modulo), avoiding no-op spin. Attaches `ScreenWobble` component (D6-A).
+#[allow(clippy::too_many_arguments)]
 fn apply_spinner(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut party: Query<(Entity, &mut Facing), With<PlayerParty>>,
     mut commands: Commands,
     mut sfx: MessageWriter<SfxRequest>,
@@ -593,7 +545,8 @@ fn apply_spinner(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     let Ok((entity, mut facing)) = party.single_mut() else {
@@ -624,8 +577,8 @@ fn apply_spinner(
         });
         commands.entity(entity).insert(ScreenWobble {
             elapsed_secs: 0.0,
-            duration_secs: 0.2,
-            amplitude: 0.15, // radians
+            duration_secs: 0.4, // doubled — user feedback "wobble should be stronger"
+            amplitude: 0.35,    // radians (~20°) — was 0.15 (~8.6°), too subtle
             last_applied_jitter: 0.0,
         });
     }
@@ -668,6 +621,7 @@ fn apply_anti_magic_zone(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<ActiveFloorNumber>,
     party: Query<Entity, With<PlayerParty>>,
     has_zone: Query<(), With<AntiMagicZone>>,
     mut commands: Commands,
@@ -675,7 +629,8 @@ fn apply_anti_magic_zone(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     let Ok(entity) = party.single() else {

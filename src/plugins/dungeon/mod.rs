@@ -200,14 +200,37 @@ pub struct MovedEvent {
 // Plugin
 // ---------------------------------------------------------------------------
 
+/// Which floor the player is currently exploring. Resolved on every
+/// `OnEnter(Dungeon)` from `PendingTeleport` (set by cross-floor teleport)
+/// or kept at the previous value (cold boot defaults to 1).
+///
+/// Read by every system that needs to look up the active `DungeonFloor`
+/// (`spawn_dungeon_geometry`, `handle_dungeon_input`, all `CellFeaturesPlugin`
+/// systems, the minimap subscriber, etc.). Replaces the ad-hoc
+/// `&assets.floor_01` access that previously hardcoded floor 1 everywhere.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveFloorNumber(pub u32);
+
+impl Default for ActiveFloorNumber {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
 pub struct DungeonPlugin;
 
 impl Plugin for DungeonPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MovedEvent>()
+            .init_resource::<ActiveFloorNumber>()
             .add_systems(
                 OnEnter(GameState::Dungeon),
-                (spawn_party_and_camera, spawn_dungeon_geometry),
+                (
+                    update_active_floor_from_pending,
+                    spawn_party_and_camera,
+                    spawn_dungeon_geometry,
+                )
+                    .chain(),
             )
             .add_systems(OnExit(GameState::Dungeon), despawn_dungeon_entities)
             .add_systems(
@@ -376,6 +399,33 @@ pub(crate) fn floor_handle_for(assets: &DungeonAssets, floor_number: u32) -> &Ha
     }
 }
 
+/// Resolve the active floor number on every `OnEnter(Dungeon)`. Reads the
+/// current `PendingTeleport` (set by cross-floor teleport) without consuming
+/// it — `spawn_party_and_camera` is the authoritative consumer that calls
+/// `.take()`. If no teleport is in flight, retain the previous value (cold
+/// boot defaults to 1 via `ActiveFloorNumber::default`).
+///
+/// Chained `.before()` `spawn_party_and_camera` and `spawn_dungeon_geometry`
+/// in `DungeonPlugin::build`.
+pub(crate) fn update_active_floor_from_pending(
+    pending: Option<Res<crate::plugins::dungeon::features::PendingTeleport>>,
+    mut active: ResMut<ActiveFloorNumber>,
+) {
+    let Some(pt) = pending else {
+        return;
+    };
+    let Some(target) = pt.target.as_ref() else {
+        return;
+    };
+    if active.0 != target.floor {
+        info!(
+            "Active floor {} → {} via PendingTeleport",
+            active.0, target.floor
+        );
+        active.0 = target.floor;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
@@ -396,6 +446,7 @@ fn spawn_party_and_camera(
     mut commands: Commands,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut pending_teleport: Option<ResMut<crate::plugins::dungeon::features::PendingTeleport>>,
 ) {
     let Some(assets) = dungeon_assets else {
@@ -404,16 +455,16 @@ fn spawn_party_and_camera(
     };
 
     // Feature #13 cross-floor teleport (D3-α + D11-A):
-    // Determine the active floor number from PendingTeleport (if set), then
-    // resolve the correct floor handle. pt.target.take() clears the resource
-    // after use so non-teleport re-entries don't reuse it.
-    let active_floor_number = pending_teleport
-        .as_ref()
-        .and_then(|pt| pt.target.as_ref().map(|t| t.floor))
-        .unwrap_or(1);
-    let floor_handle = floor_handle_for(&assets, active_floor_number);
+    // Floor is resolved from `ActiveFloorNumber` (set by
+    // `update_active_floor_from_pending`, which ran .chain()'d before us).
+    // We still consume `PendingTeleport.target` here for the entry coordinates
+    // — it's the authoritative single-consumer.
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
     let Some(floor) = floors.get(floor_handle) else {
-        warn!("DungeonFloor not yet loaded; party spawn deferred");
+        warn!(
+            "DungeonFloor for floor {} not yet loaded; party spawn deferred",
+            active_floor.0
+        );
         return;
     };
 
@@ -526,14 +577,19 @@ fn spawn_dungeon_geometry(
     mut materials: ResMut<Assets<StandardMaterial>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
 ) {
     // Asset-tolerant: same pattern as spawn_party_and_camera.
     let Some(assets) = dungeon_assets else {
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); geometry spawn deferred");
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
-        warn!("DungeonFloor not yet loaded; geometry spawn deferred");
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
+        warn!(
+            "DungeonFloor for floor {} not yet loaded; geometry spawn deferred",
+            active_floor.0
+        );
         return;
     };
 
@@ -702,6 +758,7 @@ pub(crate) fn handle_dungeon_input(
     actions: Res<ActionState<DungeonAction>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    active_floor: Res<ActiveFloorNumber>,
     door_states: Res<crate::plugins::dungeon::features::DoorStates>, // Feature #13 D9b
     mut sfx: MessageWriter<SfxRequest>,
     mut moved: MessageWriter<MovedEvent>,
@@ -717,7 +774,8 @@ pub(crate) fn handle_dungeon_input(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
 
@@ -903,6 +961,7 @@ fn spawn_debug_grid_hud(mut commands: Commands) {
 #[cfg(feature = "dev")]
 fn update_debug_grid_hud(
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
+    active_floor: Res<ActiveFloorNumber>,
     mut hud: Query<&mut Text, With<DebugGridHud>>,
 ) {
     let Ok((pos, facing)) = party.single() else {
@@ -911,7 +970,10 @@ fn update_debug_grid_hud(
     let Ok(mut text) = hud.single_mut() else {
         return;
     };
-    text.0 = format!("Position: ({}, {}) | Facing: {:?}", pos.x, pos.y, facing.0);
+    text.0 = format!(
+        "Floor {} | Position: ({}, {}) | Facing: {:?}",
+        active_floor.0, pos.x, pos.y, facing.0
+    );
 }
 
 /// `OnExit(GameState::Dungeon)` (dev-only) — despawn the HUD overlay.

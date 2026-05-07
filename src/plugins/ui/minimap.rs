@@ -193,12 +193,14 @@ fn update_explored_on_move(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<crate::plugins::dungeon::ActiveFloorNumber>,
     mut explored: ResMut<ExploredCells>,
 ) {
     let Some(assets) = dungeon_assets else {
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = crate::plugins::dungeon::floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
 
@@ -266,13 +268,15 @@ fn paint_minimap_overlay(
     explored: Res<ExploredCells>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<crate::plugins::dungeon::ActiveFloorNumber>,
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(assets) = dungeon_assets else {
         return Ok(());
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = crate::plugins::dungeon::floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return Ok(());
     };
     let Ok((pos, facing)) = party.single() else {
@@ -306,13 +310,15 @@ fn paint_minimap_full(
     explored: Res<ExploredCells>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
+    active_floor: Res<crate::plugins::dungeon::ActiveFloorNumber>,
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(assets) = dungeon_assets else {
         return Ok(());
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    let floor_handle = crate::plugins::dungeon::floor_handle_for(&assets, active_floor.0);
+    let Some(floor) = floors.get(floor_handle) else {
         return Ok(());
     };
     let Ok((pos, facing)) = party.single() else {
@@ -582,6 +588,8 @@ mod tests {
         .init_resource::<ActionState<DungeonAction>>()
         // Assets<DungeonFloor> needed by update_explored_on_move.
         .init_asset::<DungeonFloor>()
+        // ActiveFloorNumber needed by update_explored_on_move + paint_minimap_*.
+        .init_resource::<crate::plugins::dungeon::ActiveFloorNumber>()
         .add_message::<MovedEvent>()
         .add_plugins(MinimapPlugin);
         // ButtonInput<KeyCode> required by StatePlugin::build under --features dev
