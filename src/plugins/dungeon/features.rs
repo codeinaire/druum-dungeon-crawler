@@ -184,13 +184,22 @@ fn populate_locked_doors(
     mut locked_doors: ResMut<LockedDoors>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    pending_teleport: Option<Res<PendingTeleport>>,
 ) {
     locked_doors.by_edge.clear();
     let Some(assets) = dungeon_assets else {
         return;
     };
-    // Phase 5-7: reads floor_01. Phase 8 upgrades to active floor via PendingTeleport.
-    let Some(floor) = floors.get(&assets.floor_01) else {
+    // Phase 8: use the active floor number from PendingTeleport if set.
+    // PendingTeleport.target.take() is called by spawn_party_and_camera, which
+    // runs first in OnEnter(Dungeon). Both systems are in the same schedule so
+    // we peek at the target (read-only) rather than taking it here.
+    let active_floor_number = pending_teleport
+        .as_ref()
+        .and_then(|pt| pt.target.as_ref().map(|t| t.floor))
+        .unwrap_or(1);
+    let floor_handle = crate::plugins::dungeon::floor_handle_for(&assets, active_floor_number);
+    let Some(floor) = floors.get(floor_handle) else {
         return;
     };
     for ((x, y), dir, id) in &floor.locked_doors {
@@ -707,6 +716,7 @@ mod app_tests {
             .add(floor);
         app.world_mut().insert_resource(DungeonAssets {
             floor_01: handle.clone(),
+            floor_02: Handle::default(),
             item_db: Handle::default(),
             enemy_db: Handle::default(),
             class_table: Handle::default(),

@@ -31,6 +31,9 @@ use crate::plugins::state::GameState;
 pub struct DungeonAssets {
     #[asset(path = "dungeons/floor_01.dungeon.ron")]
     pub floor_01: Handle<DungeonFloor>,
+    // Feature #13 — minimal floor for cross-floor teleport testing (D11-A):
+    #[asset(path = "dungeons/floor_02.dungeon.ron")]
+    pub floor_02: Handle<DungeonFloor>,
     #[asset(path = "items/core.items.ron")]
     pub item_db: Handle<ItemDb>,
     #[asset(path = "enemies/core.enemies.ron")]

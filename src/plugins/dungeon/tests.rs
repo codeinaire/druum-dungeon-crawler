@@ -212,6 +212,7 @@ fn insert_test_floor(app: &mut App, floor: DungeonFloor) {
         .add(floor);
     app.world_mut().insert_resource(DungeonAssets {
         floor_01: handle,
+        floor_02: Handle::default(),
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),

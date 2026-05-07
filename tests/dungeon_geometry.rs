@@ -136,6 +136,7 @@ fn setup_dungeon_assets_and_enter(
 ) {
     commands.insert_resource(DungeonAssets {
         floor_01: floor_assets.floor.clone(),
+        floor_02: Handle::default(),
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),

@@ -361,6 +361,21 @@ fn flicker_factor(t: f32, phase: f32) -> f32 {
     (1.0 + 0.10 * s1 + 0.05 * s2).clamp(0.80, 1.20)
 }
 
+/// Returns the `DungeonFloor` handle for `floor_number` from `DungeonAssets`.
+/// Falls back to `floor_01` for unknown floor numbers and emits a warning.
+/// Feature #13 Phase 8 (D11-A): floor_02 is the only additional floor in v1;
+/// future floors follow the same match arm pattern.
+pub(crate) fn floor_handle_for(assets: &DungeonAssets, floor_number: u32) -> &Handle<DungeonFloor> {
+    match floor_number {
+        1 => &assets.floor_01,
+        2 => &assets.floor_02,
+        n => {
+            warn!("No DungeonFloor handle for floor {n}; falling back to floor_01");
+            &assets.floor_01
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
@@ -387,14 +402,22 @@ fn spawn_party_and_camera(
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); party spawn deferred");
         return;
     };
-    let Some(floor) = floors.get(&assets.floor_01) else {
+
+    // Feature #13 cross-floor teleport (D3-α + D11-A):
+    // Determine the active floor number from PendingTeleport (if set), then
+    // resolve the correct floor handle. pt.target.take() clears the resource
+    // after use so non-teleport re-entries don't reuse it.
+    let active_floor_number = pending_teleport
+        .as_ref()
+        .and_then(|pt| pt.target.as_ref().map(|t| t.floor))
+        .unwrap_or(1);
+    let floor_handle = floor_handle_for(&assets, active_floor_number);
+    let Some(floor) = floors.get(floor_handle) else {
         warn!("DungeonFloor not yet loaded; party spawn deferred");
         return;
     };
 
-    // Feature #13 cross-floor teleport (D3-α):
-    // If PendingTeleport is set, use its destination instead of floor.entry_point,
-    // then clear it. Otherwise spawn at floor.entry_point as before.
+    // Override entry_point if teleport target is set; clear after use.
     let (sx, sy, facing) = if let Some(ref mut pt) = pending_teleport {
         if let Some(target) = pt.target.take() {
             let facing = target.facing.unwrap_or(floor.entry_point.2);
