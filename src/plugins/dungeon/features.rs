@@ -183,7 +183,46 @@ impl Plugin for CellFeaturesPlugin {
                         .run_if(in_state(GameState::Dungeon))
                         .after(animate_movement), // win the rotation race (Risk register)
                 ),
-            );
+            )
+            // DIAGNOSTIC — runs in every state, not gated. Logs whenever the
+            // F key is just-pressed, regardless of GameState or leafwing
+            // translation. Helps diagnose why handle_door_interact may not fire.
+            .add_systems(Update, debug_log_f_keypress);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Systems — diagnostic
+// ---------------------------------------------------------------------------
+
+/// Diagnostic — logs whenever the physical `KeyF` key is just-pressed,
+/// alongside the current `GameState` and leafwing's `ActionState<Interact>`.
+/// Helps locate why `handle_door_interact` may not fire: if this logs but
+/// `handle_door_interact` does not, the `run_if(in_state(Dungeon))` gate or
+/// the leafwing translation is at fault. If this does NOT log, the keyboard
+/// input pipeline is broken (e.g. window has no focus).
+#[allow(clippy::needless_pass_by_value)]
+fn debug_log_f_keypress(
+    keys: Res<ButtonInput<KeyCode>>,
+    actions: Option<Res<ActionState<DungeonAction>>>,
+    state: Res<State<GameState>>,
+) {
+    if keys.just_pressed(KeyCode::KeyF) {
+        let interact_just_pressed = actions
+            .as_deref()
+            .map(|a| a.just_pressed(&DungeonAction::Interact))
+            .unwrap_or(false);
+        let interact_pressed = actions
+            .as_deref()
+            .map(|a| a.pressed(&DungeonAction::Interact))
+            .unwrap_or(false);
+        info!(
+            "F key just_pressed: GameState={:?}, ActionState<Interact>::just_pressed={}, pressed={}, action_state_present={}",
+            state.get(),
+            interact_just_pressed,
+            interact_pressed,
+            actions.is_some(),
+        );
     }
 }
 
