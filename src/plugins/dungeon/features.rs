@@ -25,7 +25,7 @@ use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::dungeon::{
     ActiveFloorNumber, Facing, GridPosition, MovedEvent, PlayerParty, animate_movement,
-    floor_handle_for, handle_dungeon_input, update_active_floor_from_pending,
+    facing_to_quat, floor_handle_for, handle_dungeon_input, update_active_floor_from_pending,
 };
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
@@ -89,17 +89,18 @@ pub struct AntiMagicZone;
 /// after a spinner trigger. Lifecycle mirrors `MovementAnimation`'s
 /// remove-on-completion pattern. Damped sine: `amplitude × sin(8πt) × (1 − t)`.
 ///
-/// `last_applied_jitter` tracks the previous frame's Z-rotation contribution so
-/// `tick_screen_wobble` can apply the SIGNED DELTA each frame instead of compounding.
-/// This composes cleanly with `animate_movement`'s rotation tween and produces
-/// zero rotation drift after the wobble completes (envelope→0 ⇒ jitter→0 ⇒
-/// final delta cancels the prior jitter).
+/// `base_rotation` is the canonical post-spin rotation (the new facing's
+/// `facing_to_quat` value). Each tick sets `transform.rotation = base * jitter`
+/// ABSOLUTELY rather than composing a delta — this overrides any
+/// `MovementAnimation::translate` "preserve from rotation" overwrite that
+/// would otherwise lock a wobbled rotation into the camera permanently. At
+/// `t = 1`, jitter is 0 and rotation lands at `base_rotation` exactly.
 #[derive(Component, Debug, Clone)]
 pub struct ScreenWobble {
     pub elapsed_secs: f32,
     pub duration_secs: f32,
     pub amplitude: f32,
-    pub last_applied_jitter: f32,
+    pub base_rotation: Quat,
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +513,10 @@ fn apply_teleporter(
             pos.y = target.y;
             if let Some(new_facing) = target.facing {
                 facing.0 = new_facing;
+                // Snap rotation to match the new facing — same reason as
+                // apply_spinner. Without this, the camera stays pointed at
+                // the old facing while logic moves to the new direction.
+                transform.rotation = facing_to_quat(new_facing);
             }
             // Snap visual transform to new world position (CELL_SIZE = 2.0).
             transform.translation = Vec3::new(target.x as f32 * 2.0, 0.0, target.y as f32 * 2.0);
@@ -530,14 +535,21 @@ fn apply_teleporter(
 }
 
 /// Spinner — pick a random direction (D14 fallback: `Time::elapsed_secs_f64`
-/// modulo), avoiding no-op spin. Attaches `ScreenWobble` component (D6-A).
+/// modulo), avoiding no-op spin. Snaps `Transform.rotation` to the new
+/// facing AND attaches `ScreenWobble` (D6-A) for the camera-shake feedback.
+///
+/// The rotation snap is essential: spinner only mutates `Facing`, but
+/// nothing else syncs `Transform.rotation` to the new facing on its own
+/// (Q/E does it via `MovementAnimation::rotate`; W/A/S/D leaves rotation
+/// unchanged). Without this snap, after the wobble ends the camera is
+/// pointed at the OLD facing while the player is logically on the new one.
 #[allow(clippy::too_many_arguments)]
 fn apply_spinner(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     active_floor: Res<ActiveFloorNumber>,
-    mut party: Query<(Entity, &mut Facing), With<PlayerParty>>,
+    mut party: Query<(Entity, &mut Facing, &mut Transform), With<PlayerParty>>,
     mut commands: Commands,
     mut sfx: MessageWriter<SfxRequest>,
     time: Res<Time>,
@@ -549,7 +561,7 @@ fn apply_spinner(
     let Some(floor) = floors.get(floor_handle) else {
         return;
     };
-    let Ok((entity, mut facing)) = party.single_mut() else {
+    let Ok((entity, mut facing, mut transform)) = party.single_mut() else {
         return;
     };
     for ev in moved.read() {
@@ -572,6 +584,8 @@ fn apply_spinner(
             dirs[idx]
         };
         facing.0 = new_dir;
+        let canonical_rotation = facing_to_quat(new_dir);
+        transform.rotation = canonical_rotation;
         sfx.write(SfxRequest {
             kind: SfxKind::SpinnerWhoosh,
         });
@@ -579,19 +593,20 @@ fn apply_spinner(
             elapsed_secs: 0.0,
             duration_secs: 0.4, // doubled — user feedback "wobble should be stronger"
             amplitude: 0.35,    // radians (~20°) — was 0.15 (~8.6°), too subtle
-            last_applied_jitter: 0.0,
+            base_rotation: canonical_rotation,
         });
     }
 }
 
 /// Tick the screen-wobble animation. Damped sine: `amplitude × sin(8πt) × (1 − t)`.
-/// Runs `.after(animate_movement)` so movement-tween rotation is settled before
-/// we layer the wobble on top.
+/// Runs `.after(animate_movement)` so the wobble overrides any rotation
+/// `animate_movement` set this frame (e.g., from `MovementAnimation::translate`'s
+/// "preserve from rotation" semantics, which would otherwise lock a wobbled
+/// rotation into the camera and never recover).
 ///
-/// Applies the SIGNED DELTA between this frame's jitter and the previous frame's,
-/// so the wobble composes with `animate_movement`'s rotation without compounding.
-/// When the envelope reaches zero (t = 1), `jitter = 0` and `delta = -last_applied`
-/// — the final tick exactly cancels the residual rotation. Zero drift.
+/// Sets `transform.rotation` ABSOLUTELY each frame as `base_rotation × jitter`.
+/// When the envelope reaches zero (t = 1), `jitter = 0` and rotation is
+/// exactly `base_rotation` — guaranteed return to the canonical facing.
 fn tick_screen_wobble(
     mut commands: Commands,
     time: Res<Time>,
@@ -603,9 +618,7 @@ fn tick_screen_wobble(
         let envelope = (1.0 - t).max(0.0);
         let oscillation = (8.0 * std::f32::consts::PI * t).sin();
         let jitter = wobble.amplitude * envelope * oscillation;
-        let delta = jitter - wobble.last_applied_jitter;
-        transform.rotation *= Quat::from_rotation_z(delta);
-        wobble.last_applied_jitter = jitter;
+        transform.rotation = wobble.base_rotation * Quat::from_rotation_z(jitter);
         if t >= 1.0 {
             commands.entity(entity).remove::<ScreenWobble>();
         }

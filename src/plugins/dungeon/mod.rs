@@ -276,7 +276,7 @@ fn grid_to_world(pos: GridPosition) -> Vec3 {
 /// - `East  → -π/2` (clockwise 90° when viewed from above; turning right from North)
 /// - `South → π`
 /// - `West  → +π/2`
-fn facing_to_quat(facing: Direction) -> Quat {
+pub(crate) fn facing_to_quat(facing: Direction) -> Quat {
     use std::f32::consts::{FRAC_PI_2, PI};
     let angle = match facing {
         Direction::North => 0.0,
@@ -828,10 +828,17 @@ pub(crate) fn handle_dungeon_input(
         let from_translation = grid_to_world(old_pos);
         let to_translation = grid_to_world(*pos);
 
+        // Use the canonical facing rotation, NOT `transform.rotation`. If a
+        // wobble or other rotation perturbation is in flight, capturing the
+        // current visible rotation would lock that perturbation into the
+        // translation animation's from/to (which are equal — translate doesn't
+        // tween rotation), permanently baking the tilt into the camera until
+        // the next Q/E press. The canonical rotation here lets translate
+        // re-assert upright as soon as a wobble ends.
         commands.entity(entity).insert(MovementAnimation::translate(
             from_translation,
             to_translation,
-            transform.rotation,
+            facing_to_quat(facing.0),
         ));
 
         sfx.write(SfxRequest {
