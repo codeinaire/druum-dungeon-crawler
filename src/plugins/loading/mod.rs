@@ -14,6 +14,7 @@ use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
 use crate::data::{ClassTable, DungeonFloor, EnemyDb, ItemDb, SpellTable};
+use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
 /// Resource populated by `bevy_asset_loader` once all collection handles
@@ -119,7 +120,35 @@ impl Plugin for LoadingPlugin {
             //     are spawned on OnEnter(Loading) and despawned on
             //     OnExit(Loading) — both tagged LoadingScreenRoot.
             .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
-            .add_systems(OnExit(GameState::Loading), despawn_loading_screen);
+            .add_systems(OnExit(GameState::Loading), despawn_loading_screen)
+            // Feature #13 cross-floor teleport (D3-α):
+            .add_systems(
+                Update,
+                handle_teleport_request.run_if(in_state(GameState::Dungeon)),
+            );
+    }
+}
+
+/// Consumes `TeleportRequested` and triggers a re-entry into
+/// `GameState::Loading -> GameState::Dungeon` with the destination stashed
+/// in `PendingTeleport`. The next `OnEnter(Dungeon)` reads the destination
+/// and overrides `floor.entry_point`.
+///
+/// Runs in `Update` while in `GameState::Dungeon`. Reading `requests.read().last()`
+/// collapses multiple same-frame requests to the most recent (e.g., walking
+/// into a chain of teleporters in one tick — last writer wins).
+fn handle_teleport_request(
+    mut requests: MessageReader<TeleportRequested>,
+    mut pending: ResMut<PendingTeleport>,
+    mut next: ResMut<NextState<GameState>>,
+) {
+    if let Some(req) = requests.read().last() {
+        pending.target = Some(req.target.clone());
+        next.set(GameState::Loading);
+        info!(
+            "Teleport requested to floor {} at ({}, {})",
+            req.target.floor, req.target.x, req.target.y
+        );
     }
 }
 

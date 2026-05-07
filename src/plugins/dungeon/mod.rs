@@ -381,6 +381,7 @@ fn spawn_party_and_camera(
     mut commands: Commands,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    mut pending_teleport: Option<ResMut<crate::plugins::dungeon::features::PendingTeleport>>,
 ) {
     let Some(assets) = dungeon_assets else {
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); party spawn deferred");
@@ -391,7 +392,19 @@ fn spawn_party_and_camera(
         return;
     };
 
-    let (sx, sy, facing) = floor.entry_point;
+    // Feature #13 cross-floor teleport (D3-α):
+    // If PendingTeleport is set, use its destination instead of floor.entry_point,
+    // then clear it. Otherwise spawn at floor.entry_point as before.
+    let (sx, sy, facing) = if let Some(ref mut pt) = pending_teleport {
+        if let Some(target) = pt.target.take() {
+            let facing = target.facing.unwrap_or(floor.entry_point.2);
+            (target.x, target.y, facing)
+        } else {
+            floor.entry_point
+        }
+    } else {
+        floor.entry_point
+    };
     let start_pos = GridPosition { x: sx, y: sy };
     let world_pos = grid_to_world(start_pos);
     let initial_rotation = facing_to_quat(facing);
