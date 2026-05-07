@@ -6,6 +6,7 @@ use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use leafwing_input_manager::user_input::Buttonlike;
 
+use crate::plugins::combat::CombatPlugin;
 use crate::plugins::dungeon::features::CellFeaturesPlugin;
 use crate::plugins::input::ActionsPlugin;
 use crate::plugins::party::PartyPlugin;
@@ -161,6 +162,7 @@ fn make_test_app() -> App {
         DungeonPlugin,
         CellFeaturesPlugin,
         PartyPlugin,
+        CombatPlugin,
     ));
     app.init_asset::<DungeonFloor>();
     app.init_asset::<crate::data::ItemDb>();

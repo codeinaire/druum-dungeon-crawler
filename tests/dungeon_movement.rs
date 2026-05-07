@@ -24,6 +24,7 @@ use bevy_common_assets::ron::RonAssetPlugin;
 
 use druum::data::{DungeonFloor, ItemDb};
 use druum::plugins::audio::SfxRequest;
+use druum::plugins::combat::CombatPlugin;
 use druum::plugins::dungeon::features::CellFeaturesPlugin;
 use druum::plugins::dungeon::{DungeonCamera, DungeonPlugin, GridPosition, PlayerParty};
 use druum::plugins::input::ActionsPlugin;
@@ -61,6 +62,7 @@ fn party_spawns_at_entry_point_on_enter_dungeon() {
         DungeonPlugin,
         CellFeaturesPlugin,
         PartyPlugin,
+        CombatPlugin,
     ));
 
     // spawn_test_scene requires Assets<Mesh> and Assets<StandardMaterial>.

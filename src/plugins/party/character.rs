@@ -222,24 +222,47 @@ pub struct Equipment {
 // 3e. Status effect components
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// V1 negative status set.
+/// V1 status set + Feature #14 extensions.
 ///
-/// Per Decision 7: `Dead` is a variant here — NOT a separate marker component.
-/// `derive_stats` branches on `Dead`; combat (#15) checks
-/// `status.has(StatusEffectType::Dead)`. Buffs (`AttackUp`, `DefenseUp`,
-/// etc.) are deferred to #15.
+/// **Append-only enum (Pitfall 5 of #14):** Discriminant indices 0-4 are
+/// LOCKED for save-format stability. Indices 5-9 added in #14. New variants
+/// (e.g., `Blind`, `Confused` in #15) MUST go at end.
 ///
-/// The `magnitude` field on `ActiveEffect` is part of the schema for #15
-/// buff types but is **unused by v1 status types in `derive_stats`** — the
-/// v1 types are pure gates or tick-on-turn effects with no stat modifier.
+/// **Buff variants (`AttackUp`, `DefenseUp`, `SpeedUp`):** modify
+/// `derive_stats` output via the `magnitude` field as a multiplier (e.g.,
+/// `AttackUp 0.5` = +50% attack). Re-derive triggered by
+/// `apply_status_handler` writing `EquipmentChangedEvent` with
+/// `slot: EquipSlot::None` (sentinel).
+///
+/// **`Regen`:** ticks per dungeon step; healing mirrors Poison damage shape.
+///
+/// **`Silence`:** predicate `is_silenced` available in
+/// `combat/status_effects.rs`; #15 wires into `turn_manager` for
+/// spell-action gating.
+///
+/// The `magnitude` field on `ActiveEffect` is used by:
+/// - Buffs (`AttackUp`/`DefenseUp`/`SpeedUp`): multiplier (e.g. `0.5` = +50%).
+/// - Tick effects (`Poison`/`Regen`): per-tick magnitude.
+/// - Pure gates (`Sleep`/`Paralysis`/`Stone`/`Dead`/`Silence`): unused; set 0.0.
+// HISTORICAL APPEND ORDER — DO NOT REORDER. New variants go at end.
+// Save-format stability depends on discriminant indices being stable across
+// versions (Pitfall 5 of #14, Decision 7 of #11). Adding a variant in the
+// middle shifts every saved status effect's serialized byte.
 #[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatusEffectType {
     #[default]
-    Poison,
-    Sleep,
-    Paralysis,
-    Stone,
-    Dead,
+    Poison, // 0
+    Sleep,     // 1
+    Paralysis, // 2
+    Stone,     // 3
+    Dead,      // 4
+    // ── Feature #14 additions (append-only) ────────────────────────────
+    AttackUp,  // 5  — multiplier on `attack`
+    DefenseUp, // 6  — multiplier on `defense`
+    SpeedUp,   // 7  — multiplier on `speed`
+    Regen,     // 8  — heals on tick (mirror of Poison)
+    Silence,   // 9  — gates spell action selection (#15 wires in turn_manager)
+               // Blind, Confused: deferred to #15 (no readers in #14).
 }
 
 /// One active status instance on a character.
@@ -256,7 +279,14 @@ pub struct ActiveEffect {
     /// `None` for permanent/non-tickable effects (Stone, Dead).
     /// `Some(n)` for temporary effects (Poison, Sleep, Paralysis).
     pub remaining_turns: Option<u32>,
-    /// Unused by v1 status types; reserved for #15 magnitude-modifying buffs.
+    /// Magnitude / potency, depending on effect type.
+    ///
+    /// - Buffs: multiplier (e.g., `0.5` = +50% attack).
+    /// - Tick effects (Poison, Regen): per-tick magnitude.
+    /// - Pure gates (Sleep, Paralysis, Stone, Dead, Silence): unused; set 0.0.
+    ///
+    /// Clamped at the trust boundary by `apply_status_handler` to `[0.0, 10.0]`
+    /// (Pitfall 6 of #14).
     pub magnitude: f32,
 }
 
@@ -334,12 +364,13 @@ impl Default for PartySize {
 /// `items.ron` data (research §Security; see `derive_stats_saturating_arithmetic`
 /// test).
 ///
-/// **V1 status note:** v1 status types (`Poison`, `Sleep`, `Paralysis`,
-/// `Stone`, `Dead`) are trivially order-independent because none of them
-/// modify a stat via the `magnitude` field — they are pure gates.
-/// #15 will add magnitude-modifying buff branches; at that point, order
-/// dependence must be re-evaluated and the deferred
-/// `derive_stats_status_order_independent` test should be written.
+/// **Status post-pass:** The buff branches (`AttackUp`/`DefenseUp`/`SpeedUp`)
+/// modify their respective stats by `magnitude` as a multiplier. The merge
+/// rule in `apply_status_handler` guarantees at most one of each variant is
+/// present; iteration is order-independent (test
+/// `derive_stats_status_order_independent`). The `Dead` branch runs LAST
+/// and zeroes `max_hp`/`max_mp` (Pitfall 4 of #14: zero-out dominates). Future
+/// magnitude-modifying variants (#15+) follow the same pattern.
 pub fn derive_stats(
     base: &BaseStats,
     equip_stats: &[ItemStatBlock],
@@ -382,11 +413,11 @@ pub fn derive_stats(
     }
 
     // ── Base-stat contributions ──────────────────────────────────────────────
-    let stat_attack = (base.strength as u32).saturating_add(equip_attack);
-    let stat_defense = (base.vitality as u32 / 2).saturating_add(equip_defense);
+    let mut stat_attack = (base.strength as u32).saturating_add(equip_attack);
+    let mut stat_defense = (base.vitality as u32 / 2).saturating_add(equip_defense);
     let stat_magic_attack = (base.intelligence as u32).saturating_add(equip_magic_attack);
     let stat_magic_defense = (base.piety as u32 / 2).saturating_add(equip_magic_defense);
-    let stat_speed = base.agility as u32;
+    let mut stat_speed = base.agility as u32;
     let stat_accuracy = (base.agility as u32 / 2)
         .saturating_add(base.luck as u32 / 4)
         .saturating_add(equip_accuracy);
@@ -397,18 +428,42 @@ pub fn derive_stats(
     let mut max_hp = base_hp.saturating_add(equip_hp_bonus);
     let mut max_mp = base_mp.saturating_add(equip_mp_bonus);
 
-    // ── Status effect post-pass (v1 gates only) ──────────────────────────────
-    // V1 status types are order-independent (none modify via magnitude).
-    // #15 will add magnitude-modifying buff branches here.
+    // ── Status effect post-pass ──────────────────────────────────────────────
+    // The merge rule in `apply_status_handler` guarantees AT MOST ONE of each
+    // variant is present, so iterating without a "first wins" or
+    // "stack" rule is correct (Pitfall 2 of #14: order-independence preserved
+    // by the merge invariant — see test `derive_stats_status_order_independent`).
+    for effect in &status.effects {
+        match effect.effect_type {
+            // ── Buff branches (Feature #14) ──────────────────────────────
+            // `magnitude` is a multiplier; saturating arithmetic guards against
+            // overflow on extreme values (clamped to [0.0, 10.0] at the trust
+            // boundary in apply_status_handler — Pitfall 6).
+            StatusEffectType::AttackUp => {
+                let bonus = (stat_attack as f32 * effect.magnitude) as u32;
+                stat_attack = stat_attack.saturating_add(bonus);
+            }
+            StatusEffectType::DefenseUp => {
+                let bonus = (stat_defense as f32 * effect.magnitude) as u32;
+                stat_defense = stat_defense.saturating_add(bonus);
+            }
+            StatusEffectType::SpeedUp => {
+                let bonus = (stat_speed as f32 * effect.magnitude) as u32;
+                stat_speed = stat_speed.saturating_add(bonus);
+            }
+            // Poison, Sleep, Paralysis, Stone, Silence, Regen: not derive-time
+            // modifiers. Poison/Regen tick in `combat/status_effects.rs`;
+            // Sleep/Paralysis/Silence gate action selection in #15 via predicates;
+            // Stone is treated like Dead for targeting in #15.
+            _ => {}
+        }
+    }
+
+    // ── Dead branch — LAST (Pitfall 4 of #14: zero-out dominates buffs above) ──
     if status.has(StatusEffectType::Dead) {
-        // Dead character has no HP or MP pools available.
         max_hp = 0;
         max_mp = 0;
     }
-    // Poison, Sleep, Paralysis, Stone: no stat modification at derive time.
-    // Poison ticks in #15's combat turn system.
-    // Sleep/Paralysis gate action selection in #15.
-    // Stone is treated like Dead for targeting purposes in #15.
 
     DerivedStats {
         max_hp,
@@ -608,9 +663,109 @@ mod tests {
         assert!(!status.has(StatusEffectType::Poison));
     }
 
-    // NOTE: `derive_stats_status_order_independent` is deferred to #15.
-    // V1 status types are trivially order-independent because none of them
-    // modify stats via the `magnitude` field (all are pure gates).
-    // The research-line-583 test (which uses AttackUp) requires #15's buff
-    // branches to exist before it can be authored.
+    // ── StatusEffectType discriminant order (Feature #14) ───────────────────
+
+    #[test]
+    fn status_effect_type_dead_serializes_to_index_4() {
+        // Locks the historical append order — any future reorder fails CI.
+        // ron-encoded enum unit variants serialize to "Dead" by name, not by
+        // discriminant byte; this test asserts on the bincode-equivalent
+        // discriminant via the `as u8` projection.
+        assert_eq!(StatusEffectType::Poison as u8, 0);
+        assert_eq!(StatusEffectType::Sleep as u8, 1);
+        assert_eq!(StatusEffectType::Paralysis as u8, 2);
+        assert_eq!(StatusEffectType::Stone as u8, 3);
+        assert_eq!(StatusEffectType::Dead as u8, 4);
+        assert_eq!(StatusEffectType::AttackUp as u8, 5);
+        assert_eq!(StatusEffectType::Silence as u8, 9);
+    }
+
+    // ── derive_stats buff branches (Feature #14) ─────────────────────────────
+
+    // Note (#14): the deferred test below now exists, exercising the buff
+    // branches added in #14. Phase 8 adds the multi-variant order test.
+    #[test]
+    fn derive_stats_attack_up_buffs_attack() {
+        let base = BaseStats {
+            strength: 10,
+            ..Default::default()
+        };
+        let mut status = StatusEffects::default();
+        status.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::AttackUp,
+            remaining_turns: Some(3),
+            magnitude: 0.5, // +50%
+        });
+        let derived = derive_stats(&base, &[], &status, 1);
+        // base.strength (10) + 50% = 15. (no equipment)
+        assert_eq!(derived.attack, 15, "AttackUp 0.5 should yield +50% attack");
+    }
+
+    #[test]
+    fn derive_stats_status_order_independent() {
+        // Pitfall 2 of #14: the merge rule guarantees AT MOST ONE of each
+        // variant is present in StatusEffects; iteration order over different
+        // variant types must not change the result.
+        let base = BaseStats {
+            strength: 10,
+            vitality: 10,
+            ..Default::default()
+        };
+        // Order A: AttackUp first, DefenseUp second.
+        let mut status_a = StatusEffects::default();
+        status_a.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::AttackUp,
+            remaining_turns: Some(3),
+            magnitude: 0.5,
+        });
+        status_a.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::DefenseUp,
+            remaining_turns: Some(3),
+            magnitude: 0.3,
+        });
+        // Order B: DefenseUp first, AttackUp second.
+        let mut status_b = StatusEffects::default();
+        status_b.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::DefenseUp,
+            remaining_turns: Some(3),
+            magnitude: 0.3,
+        });
+        status_b.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::AttackUp,
+            remaining_turns: Some(3),
+            magnitude: 0.5,
+        });
+        let a = derive_stats(&base, &[], &status_a, 1);
+        let b = derive_stats(&base, &[], &status_b, 1);
+        assert_eq!(a.attack, b.attack, "AttackUp/DefenseUp order independent");
+        assert_eq!(a.defense, b.defense, "AttackUp/DefenseUp order independent");
+    }
+
+    #[test]
+    fn derive_stats_dead_dominates_buffs() {
+        // Pitfall 4 of #14: Dead branch runs LAST and zeros max_hp/max_mp.
+        // Buffs above don't bypass it.
+        let base = BaseStats {
+            strength: 10,
+            vitality: 10,
+            ..Default::default()
+        };
+        let mut status = StatusEffects::default();
+        status.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::AttackUp,
+            remaining_turns: Some(3),
+            magnitude: 0.5,
+        });
+        status.effects.push(ActiveEffect {
+            effect_type: StatusEffectType::Dead,
+            remaining_turns: None,
+            magnitude: 0.0,
+        });
+        let derived = derive_stats(&base, &[], &status, 1);
+        assert_eq!(derived.max_hp, 0, "Dead zeros max_hp");
+        assert_eq!(derived.max_mp, 0, "Dead zeros max_mp");
+        // Attack is NOT zeroed — Dead doesn't touch offensive stats.
+        // Buff still applied: 10 strength + 50% = 15 attack.
+        assert_eq!(derived.attack, 15, "Dead doesn't zero attack; buff applies");
+    }
 }

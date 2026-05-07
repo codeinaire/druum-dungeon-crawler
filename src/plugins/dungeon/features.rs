@@ -23,6 +23,7 @@ use crate::data::DungeonFloor;
 use crate::data::ItemAsset;
 use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
+use crate::plugins::combat::status_effects::ApplyStatusEvent;
 use crate::plugins::dungeon::{
     ActiveFloorNumber, Facing, GridPosition, MovedEvent, PlayerParty, animate_movement,
     facing_to_quat, floor_handle_for, handle_dungeon_input, update_active_floor_from_pending,
@@ -30,8 +31,7 @@ use crate::plugins::dungeon::{
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
 use crate::plugins::party::{
-    ActiveEffect, DerivedStats, Inventory, ItemInstance, ItemKind, PartyMember, StatusEffectType,
-    StatusEffects,
+    DerivedStats, Inventory, ItemInstance, ItemKind, PartyMember, StatusEffectType,
 };
 use crate::plugins::state::GameState;
 
@@ -167,7 +167,8 @@ impl Plugin for CellFeaturesPlugin {
                         .after(handle_dungeon_input),
                     apply_poison_trap
                         .run_if(in_state(GameState::Dungeon))
-                        .after(handle_dungeon_input),
+                        .after(handle_dungeon_input)
+                        .before(crate::plugins::combat::status_effects::apply_status_handler),
                     apply_alarm_trap
                         .run_if(in_state(GameState::Dungeon))
                         .after(handle_dungeon_input),
@@ -409,16 +410,25 @@ fn apply_pit_trap(
     }
 }
 
-/// Apply poison trap on entry. Naive push (D12) — stacking deferred to #14.
+/// Apply poison trap on entry. Writes `ApplyStatusEvent` (handled by
+/// `combat/status_effects.rs::apply_status_handler` which enforces stacking).
+/// **Refactored in #14:** prior naive `effects.push(...)` removed; the
+/// canonical handler is now the single mutator of `StatusEffects.effects`.
+///
+/// Ordered `.before(apply_status_handler)` in `CellFeaturesPlugin::build`
+/// (Pitfall 1 of #14: same-frame consumability).
 fn apply_poison_trap(
     mut moved: MessageReader<MovedEvent>,
     floors: Res<Assets<DungeonFloor>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     active_floor: Res<ActiveFloorNumber>,
-    mut party: Query<&mut StatusEffects, With<PartyMember>>,
+    party: Query<Entity, With<PartyMember>>,
+    mut apply: MessageWriter<ApplyStatusEvent>,
     mut sfx: MessageWriter<SfxRequest>,
 ) {
-    const POISON_TURNS: u32 = 5;
+    const POISON_DURATION_TICKS: u32 = 5;
+    const POISON_TRAP_POTENCY: f32 = 1.0; // Risk 3: NOT 0.0.
+
     let Some(assets) = dungeon_assets else {
         return;
     };
@@ -431,16 +441,17 @@ fn apply_poison_trap(
         if !matches!(cell.trap, Some(TrapType::Poison)) {
             continue;
         }
-        for mut effects in &mut party {
-            effects.effects.push(ActiveEffect {
-                effect_type: StatusEffectType::Poison,
-                remaining_turns: Some(POISON_TURNS),
-                magnitude: 0.0,
+        for entity in &party {
+            apply.write(ApplyStatusEvent {
+                target: entity,
+                effect: StatusEffectType::Poison,
+                potency: POISON_TRAP_POTENCY,
+                duration: Some(POISON_DURATION_TICKS),
             });
         }
         sfx.write(SfxRequest {
             kind: SfxKind::Door,
-        }); // placeholder hiss (D10-A reuse)
+        }); // placeholder hiss (D10-A reuse — unchanged from #13)
     }
 }
 
@@ -746,6 +757,7 @@ mod app_tests {
             StatePlugin,
             DungeonPlugin,
             CellFeaturesPlugin,
+            crate::plugins::combat::CombatPlugin,
             PartyPlugin,
         ));
         // ActionState<DungeonAction> read by DungeonPlugin::handle_dungeon_input
@@ -958,7 +970,8 @@ mod app_tests {
         ));
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
-        app.update();
+        app.update(); // apply_poison_trap writes ApplyStatusEvent
+        app.update(); // apply_status_handler reads it and pushes to StatusEffects
 
         let poison_count: usize = app
             .world_mut()
