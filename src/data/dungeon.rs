@@ -592,8 +592,8 @@ mod tests {
         floor.locked_doors = vec![((0, 0), Direction::East, "test_door".into())];
         let serialized = ron::ser::to_string_pretty(&floor, ron::ser::PrettyConfig::default())
             .expect("DungeonFloor should serialize");
-        let parsed: DungeonFloor = ron::de::from_str(&serialized)
-            .expect("DungeonFloor should round-trip");
+        let parsed: DungeonFloor =
+            ron::de::from_str(&serialized).expect("DungeonFloor should round-trip");
         assert_eq!(parsed.locked_doors, floor.locked_doors);
     }
 

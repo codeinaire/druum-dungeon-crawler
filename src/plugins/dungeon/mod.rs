@@ -306,6 +306,51 @@ fn wall_material(
     }
 }
 
+/// Returns `true` if the player can move from cell `(pos.x, pos.y)` in direction `dir`,
+/// consulting both static `DungeonFloor::can_move` AND runtime `DoorStates`.
+///
+/// Truth table layered on `floor.can_move`:
+/// - `WallType::Door`: `DoorStates[(pos, dir)] == Some(Open)` → passable; else → blocked
+///   (default `DoorState::Closed`; D15 — closed-by-default). Pitfall 4: `floor.can_move`
+///   returns `true` for Door at the asset level — this wrapper overrides that.
+/// - `WallType::LockedDoor`: same — `DoorStates[(pos, dir)] == Some(Open)` → passable (unlocked
+///   via `handle_door_interact`). Pitfall 9: `floor.can_move` returns `false` for LockedDoor;
+///   the wrapper must return `true` when `DoorStates` says Open.
+/// - All other wall types: defer to `floor.can_move` (no DoorStates check).
+fn can_move_with_doors(
+    floor: &crate::data::DungeonFloor,
+    door_states: &crate::plugins::dungeon::features::DoorStates,
+    pos: GridPosition,
+    dir: Direction,
+) -> bool {
+    let cell = match floor
+        .walls
+        .get(pos.y as usize)
+        .and_then(|row| row.get(pos.x as usize))
+    {
+        Some(c) => c,
+        None => return false,
+    };
+    let wall = match dir {
+        Direction::North => cell.north,
+        Direction::South => cell.south,
+        Direction::East => cell.east,
+        Direction::West => cell.west,
+    };
+    use crate::plugins::dungeon::features::DoorState;
+    match wall {
+        WallType::Door | WallType::LockedDoor => {
+            let state = door_states
+                .doors
+                .get(&(pos, dir))
+                .copied()
+                .unwrap_or_default();
+            state == DoorState::Open
+        }
+        _ => floor.can_move(pos.x, pos.y, dir),
+    }
+}
+
 /// Two-sine flicker formula. Returns a multiplier to apply to base intensity.
 /// Theoretical peak amplitude is ±15% (sum of two sines at 0.10 + 0.05 weights),
 /// but clamped to `[0.80, 1.20]` defensively (Feature #9 research §Pitfall 5 —
@@ -615,11 +660,13 @@ fn spawn_dungeon_geometry(
 /// coupling would silently break). If you remove `pub(crate)`, `minimap.rs`
 /// will produce a compile error on the `.after(...)` ordering call.
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_dungeon_input(
     mut commands: Commands,
     actions: Res<ActionState<DungeonAction>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     floors: Res<Assets<DungeonFloor>>,
+    door_states: Res<crate::plugins::dungeon::features::DoorStates>, // Feature #13 D9b
     mut sfx: MessageWriter<SfxRequest>,
     mut moved: MessageWriter<MovedEvent>,
     mut query: Query<
@@ -663,7 +710,8 @@ pub(crate) fn handle_dungeon_input(
         }
 
         // Passability check: wall-bumps are silent no-ops.
-        if !floor.can_move(pos.x, pos.y, move_dir) {
+        // Feature #13 D9b: consult DoorStates for Door/LockedDoor passability.
+        if !can_move_with_doors(floor, &door_states, *pos, move_dir) {
             return;
         }
 

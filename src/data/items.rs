@@ -249,7 +249,8 @@ mod tests {
         };
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
             .expect("ItemAsset should serialize");
-        let parsed: ItemAsset = ron::de::from_str(&serialized).expect("ItemAsset should round-trip");
+        let parsed: ItemAsset =
+            ron::de::from_str(&serialized).expect("ItemAsset should round-trip");
         assert_eq!(parsed, original);
     }
 

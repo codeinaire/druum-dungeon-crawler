@@ -20,8 +20,8 @@ use leafwing_input_manager::prelude::ActionState;
 use std::collections::HashMap;
 
 use crate::data::DungeonFloor;
-use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::data::ItemAsset;
+use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::dungeon::{
     Facing, GridPosition, MovedEvent, PlayerParty, animate_movement, handle_dungeon_input,
@@ -29,8 +29,8 @@ use crate::plugins::dungeon::{
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
 use crate::plugins::party::{
-    ActiveEffect, DerivedStats, Inventory, ItemInstance, ItemKind, PartyMember,
-    StatusEffectType, StatusEffects,
+    ActiveEffect, DerivedStats, Inventory, ItemInstance, ItemKind, PartyMember, StatusEffectType,
+    StatusEffects,
 };
 use crate::plugins::state::GameState;
 
@@ -221,6 +221,7 @@ fn clear_door_resources(
 /// `WallType::LockedDoor`, walks all party inventories looking for a matching
 /// `ItemKind::KeyItem` with `key_id == door_id`; if found, sets `DoorState::Open`.
 /// Keys are NOT consumed (D13 — Wizardry-style; reusable).
+#[allow(clippy::too_many_arguments)]
 fn handle_door_interact(
     actions: Res<ActionState<DungeonAction>>,
     party: Query<(&GridPosition, &Facing), With<PlayerParty>>,
@@ -295,8 +296,13 @@ fn handle_door_interact(
             }
             if has_key {
                 door_states.doors.insert((*pos, edge_dir), DoorState::Open);
-                sfx.write(SfxRequest { kind: SfxKind::Door });
-                info!("Unlocked door at {:?} {:?} with key '{}'", pos, edge_dir, door_id);
+                sfx.write(SfxRequest {
+                    kind: SfxKind::Door,
+                });
+                info!(
+                    "Unlocked door at {:?} {:?} with key '{}'",
+                    pos, edge_dir, door_id
+                );
                 // D13: do NOT consume the key.
             } else {
                 info!(
@@ -331,7 +337,11 @@ fn apply_pit_trap(
     };
     for ev in moved.read() {
         let cell = &floor.features[ev.to.y as usize][ev.to.x as usize];
-        let Some(TrapType::Pit { damage, target_floor }) = &cell.trap else {
+        let Some(TrapType::Pit {
+            damage,
+            target_floor,
+        }) = &cell.trap
+        else {
             continue;
         };
         // Apply to all party members (genre convention — Pitfall 7: saturating_sub).
@@ -381,7 +391,9 @@ fn apply_poison_trap(
                 magnitude: 0.0,
             });
         }
-        sfx.write(SfxRequest { kind: SfxKind::Door }); // placeholder hiss (D10-A reuse)
+        sfx.write(SfxRequest {
+            kind: SfxKind::Door,
+        }); // placeholder hiss (D10-A reuse)
     }
 }
 
@@ -461,7 +473,9 @@ fn apply_teleporter(
                 target: target.clone(),
             });
         }
-        sfx.write(SfxRequest { kind: SfxKind::Door }); // placeholder (D10-A reuse)
+        sfx.write(SfxRequest {
+            kind: SfxKind::Door,
+        }); // placeholder (D10-A reuse)
     }
 }
 
@@ -529,7 +543,7 @@ fn tick_screen_wobble(
         let envelope = (1.0 - t).max(0.0);
         let oscillation = (8.0 * std::f32::consts::PI * t).sin();
         let jitter = wobble.amplitude * envelope * oscillation;
-        transform.rotation = transform.rotation * Quat::from_rotation_z(jitter);
+        transform.rotation *= Quat::from_rotation_z(jitter);
         if t >= 1.0 {
             commands.entity(entity).remove::<ScreenWobble>();
         }
@@ -608,7 +622,11 @@ mod tests {
         locked.by_edge.insert(key, "x".into());
         locked.by_edge.clear();
         locked.by_edge.insert(key, "x".into());
-        assert_eq!(locked.by_edge.len(), 1, "clear-first guarantees idempotence");
+        assert_eq!(
+            locked.by_edge.len(),
+            1,
+            "clear-first guarantees idempotence"
+        );
     }
 }
 
@@ -629,7 +647,6 @@ mod app_tests {
     use bevy::asset::AssetPlugin;
     use bevy::input::InputPlugin;
     use bevy::state::app::StatesPlugin;
-
 
     /// Build a minimal test app with DungeonPlugin + CellFeaturesPlugin + PartyPlugin.
     /// Mirrors dungeon/tests.rs::make_test_app() but adds CellFeaturesPlugin and PartyPlugin.
@@ -744,8 +761,12 @@ mod app_tests {
             bundle.derived_stats.current_hp = 10;
             app.world_mut().spawn(bundle);
         }
-        app.world_mut()
-            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::North),
+            Transform::default(),
+        ));
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
         app.update();
@@ -786,8 +807,12 @@ mod app_tests {
         for _ in 0..4 {
             app.world_mut().spawn(PartyMemberBundle::default());
         }
-        app.world_mut()
-            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::North),
+            Transform::default(),
+        ));
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
         app.update();
@@ -807,7 +832,10 @@ mod app_tests {
             .iter_current_update_messages()
             .next()
             .unwrap();
-        assert_eq!(req.target.floor, 2, "TeleportRequested target floor should be 2");
+        assert_eq!(
+            req.target.floor, 2,
+            "TeleportRequested target floor should be 2"
+        );
     }
 
     // --- poison_trap_applies_status ---
@@ -827,8 +855,12 @@ mod app_tests {
         for _ in 0..4 {
             app.world_mut().spawn(PartyMemberBundle::default());
         }
-        app.world_mut()
-            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::North),
+            Transform::default(),
+        ));
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
         app.update();
@@ -864,8 +896,12 @@ mod app_tests {
         advance_into_dungeon(&mut app);
         insert_test_floor(&mut app, make_floor_with_feature(feature));
 
-        app.world_mut()
-            .spawn((PlayerParty, GridPosition { x: 1, y: 1 }, Facing(Direction::North), Transform::default()));
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::North),
+            Transform::default(),
+        ));
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
         app.update();
@@ -928,12 +964,15 @@ mod app_tests {
         advance_into_dungeon(&mut app);
         insert_test_floor(&mut app, floor);
 
-        let party = app.world_mut().spawn((
-            PlayerParty,
-            GridPosition { x: 0, y: 0 },
-            Facing(Direction::North),
-            Transform::default(),
-        )).id();
+        let party = app
+            .world_mut()
+            .spawn((
+                PlayerParty,
+                GridPosition { x: 0, y: 0 },
+                Facing(Direction::North),
+                Transform::default(),
+            ))
+            .id();
 
         // Write a MovedEvent targeting the teleporter cell at (1,1).
         app.world_mut()
@@ -971,12 +1010,15 @@ mod app_tests {
         advance_into_dungeon(&mut app);
         insert_test_floor(&mut app, make_floor_with_feature(feature));
 
-        let party = app.world_mut().spawn((
-            PlayerParty,
-            GridPosition { x: 1, y: 1 },
-            Facing(Direction::North),
-            Transform::default(),
-        )).id();
+        let party = app
+            .world_mut()
+            .spawn((
+                PlayerParty,
+                GridPosition { x: 1, y: 1 },
+                Facing(Direction::North),
+                Transform::default(),
+            ))
+            .id();
 
         write_moved(&mut app, GridPosition { x: 1, y: 1 });
         app.update();

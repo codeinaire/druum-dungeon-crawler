@@ -34,11 +34,13 @@ use bevy::state::app::StatesPlugin;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use druum::data::DungeonFloor;
+use druum::data::{DungeonFloor, ItemDb};
 use druum::plugins::audio::SfxRequest;
+use druum::plugins::dungeon::features::CellFeaturesPlugin;
 use druum::plugins::dungeon::{DungeonGeometry, DungeonPlugin};
 use druum::plugins::input::ActionsPlugin;
 use druum::plugins::loading::DungeonAssets;
+use druum::plugins::party::PartyPlugin;
 use druum::plugins::state::{GameState, StatePlugin};
 
 /// Private loading state — only loads DungeonFloor (avoids AudioAssets/.ogg
@@ -68,12 +70,18 @@ fn dungeon_geometry_spawns_for_floor_01() {
         StatePlugin,
         ActionsPlugin,
         DungeonPlugin,
+        CellFeaturesPlugin,
+        PartyPlugin,
     ));
 
     // spawn_dungeon_geometry requires Assets<Mesh> and Assets<StandardMaterial>.
     // In production these are registered by MeshPlugin/PbrPlugin (via DefaultPlugins).
     // In headless integration tests we init them explicitly.
     app.init_asset::<Mesh>().init_asset::<StandardMaterial>();
+
+    // PartyPlugin's populate_item_handle_registry fires on OnExit(Loading) and
+    // requires Assets<ItemDb>. Register it explicitly since LoadingPlugin is absent.
+    app.init_asset::<ItemDb>();
 
     // handle_dungeon_input writes SfxRequest messages. AudioPlugin registers
     // this in production; in headless tests we register it directly.
