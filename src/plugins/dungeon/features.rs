@@ -762,15 +762,19 @@ mod app_tests {
             ..Default::default()
         };
         let mut app = make_test_app();
-        advance_into_dungeon(&mut app);
-        insert_test_floor(&mut app, make_floor_with_feature(feature));
 
-        // Spawn party members with known HP.
+        // Spawn party members BEFORE advance_into_dungeon so that
+        // spawn_default_debug_party (--features dev) sees existing members and
+        // skips, keeping the test roster isolated (exactly 4 members, HP=10).
         for _ in 0..4 {
             let mut bundle = PartyMemberBundle::default();
             bundle.derived_stats.current_hp = 10;
             app.world_mut().spawn(bundle);
         }
+
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, make_floor_with_feature(feature));
+
         app.world_mut().spawn((
             PlayerParty,
             GridPosition { x: 1, y: 1 },
