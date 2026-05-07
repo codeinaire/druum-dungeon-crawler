@@ -7,7 +7,9 @@ use druum::plugins::{
 };
 
 fn main() {
-    eprintln!("[DRUUM-DIAG] startup banner — build includes Feature #13 keypress diagnostics (b7fef3b+)");
+    eprintln!(
+        "[DRUUM-DIAG] startup banner — build includes Feature #13 keypress diagnostics (b7fef3b+)"
+    );
     App::new()
         .add_plugins((
             // AssetPlugin::watch_for_changes_override is tied to the `dev`

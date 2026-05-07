@@ -211,7 +211,10 @@ fn debug_log_f_keypress(
     // pipeline is alive even if KeyF specifically isn't reaching us.
     let pressed_now: Vec<KeyCode> = keys.get_just_pressed().copied().collect();
     if !pressed_now.is_empty() {
-        eprintln!("[DRUUM-DIAG] just_pressed keys this frame: {:?}", pressed_now);
+        eprintln!(
+            "[DRUUM-DIAG] just_pressed keys this frame: {:?}",
+            pressed_now
+        );
     }
     if keys.just_pressed(KeyCode::KeyF) {
         let interact_just_pressed = actions
