@@ -654,6 +654,7 @@ mod tests {
             entry_point: (0, 0, Direction::North),
             encounter_table: "test".into(),
             lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
         };
         let handle = app
             .world_mut()

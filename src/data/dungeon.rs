@@ -263,6 +263,12 @@ pub struct DungeonFloor {
     /// floors override per-floor for varied moods.
     #[serde(default)]
     pub lighting: LightingConfig,
+    /// Locked-door identifiers for the locked-door check in Feature #13.
+    /// Each entry: `((cell_x, cell_y), facing_direction, door_id)`.
+    /// `door_id` matches an `ItemAsset.key_id` for the locked-door unlock test.
+    /// Default empty so existing floors that omit the field still parse.
+    #[serde(default)]
+    pub locked_doors: Vec<((u32, u32), Direction, String)>,
 }
 
 impl DungeonFloor {
@@ -424,6 +430,7 @@ mod tests {
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
             lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
         }
     }
 
@@ -512,6 +519,7 @@ mod tests {
             entry_point: (0, 0, Direction::North),
             encounter_table: "test_table".into(),
             lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
         };
 
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
@@ -550,6 +558,7 @@ mod tests {
                 },
                 ambient_brightness: 2.0,
             },
+            locked_doors: Vec::new(),
         };
         let serialized = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
             .expect("serialize");
@@ -573,6 +582,19 @@ mod tests {
         )"#;
         let parsed: DungeonFloor = ron::de::from_str(ron_str).expect("parse");
         assert_eq!(parsed.lighting, LightingConfig::default());
+    }
+
+    /// Round-trip a `DungeonFloor` with a populated `locked_doors` field.
+    /// Verifies the new `#[serde(default)]` field survives serialization/deserialization.
+    #[test]
+    fn dungeon_floor_round_trips_with_locked_doors() {
+        let mut floor = make_floor(2, 2);
+        floor.locked_doors = vec![((0, 0), Direction::East, "test_door".into())];
+        let serialized = ron::ser::to_string_pretty(&floor, ron::ser::PrettyConfig::default())
+            .expect("DungeonFloor should serialize");
+        let parsed: DungeonFloor = ron::de::from_str(&serialized)
+            .expect("DungeonFloor should round-trip");
+        assert_eq!(parsed.locked_doors, floor.locked_doors);
     }
 
     // -------------------------------------------------------------------------

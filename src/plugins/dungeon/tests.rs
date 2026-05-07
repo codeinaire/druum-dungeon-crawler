@@ -193,6 +193,7 @@ fn make_open_floor(w: u32, h: u32) -> DungeonFloor {
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
         lighting: LightingConfig::default(),
+        locked_doors: Vec::new(),
     }
 }
 
@@ -449,6 +450,7 @@ fn handle_dungeon_input_drops_input_during_animation() {
             entry_point: (2, 2, Direction::North),
             encounter_table: "test_table".into(),
             lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
         };
         insert_test_floor(&mut app, floor);
     }
@@ -571,6 +573,7 @@ fn make_walled_floor(w: u32, h: u32) -> DungeonFloor {
         entry_point: (1, 1, Direction::North),
         encounter_table: "test_table".into(),
         lighting: LightingConfig::default(),
+        locked_doors: Vec::new(),
     }
 }
 
