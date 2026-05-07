@@ -265,12 +265,21 @@ fn handle_door_interact(
         return;
     }
     let Ok((pos, facing)) = party.single() else {
+        info!("Interact pressed but no PlayerParty entity");
         return;
     };
     let Some(assets) = dungeon_assets else {
+        info!(
+            "Interact pressed at {:?} facing {:?} but DungeonAssets not loaded",
+            pos, facing.0
+        );
         return;
     };
     let Some(floor) = floors.get(&assets.floor_01) else {
+        info!(
+            "Interact pressed at {:?} facing {:?} but floor_01 not yet loaded",
+            pos, facing.0
+        );
         return;
     };
 
@@ -292,6 +301,10 @@ fn handle_door_interact(
                 DoorState::Open => DoorState::Closed,
             };
             door_states.doors.insert(key, new_state);
+            info!(
+                "Door at {:?} {:?} toggled {:?} → {:?}",
+                pos, edge_dir, current, new_state
+            );
             sfx.write(SfxRequest {
                 kind: if new_state == DoorState::Open {
                     SfxKind::Door
@@ -338,7 +351,12 @@ fn handle_door_interact(
                 );
             }
         }
-        _ => {} // Not a door; no-op.
+        other => {
+            info!(
+                "Interact pressed at {:?} facing {:?}: wall is {:?}, not a door",
+                pos, edge_dir, other
+            );
+        }
     }
 }
 
@@ -1232,6 +1250,109 @@ mod app_tests {
                 .copied(),
             Some(DoorState::Closed),
             "Second Interact press on Door should toggle Open → Closed"
+        );
+    }
+
+    // --- door_interact_at_floor_01_coords_full_flow ---
+
+    /// Reproduces the user-reported production scenario at floor_01 coords:
+    /// player at (1, 1) facing East presses Interact, then can walk through.
+    /// This is the cell + direction the floor_01.dungeon.ron Door is authored at.
+    #[test]
+    fn door_interact_at_floor_01_coords_full_flow() {
+        use crate::data::dungeon::WallType;
+        use crate::plugins::dungeon::features::{DoorState, DoorStates};
+        use crate::plugins::input::DungeonAction;
+        use leafwing_input_manager::prelude::ActionState;
+
+        // Mirror floor_01.dungeon.ron: 6×6, walls[1][1].east = Door.
+        let mut floor = DungeonFloor {
+            name: "test".into(),
+            width: 6,
+            height: 6,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default(); 6]; 6],
+            features: vec![vec![CellFeatures::default(); 6]; 6],
+            entry_point: (1, 1, Direction::East),
+            encounter_table: "test_table".into(),
+            lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
+        };
+        floor.walls[1][1].east = WallType::Door;
+        floor.walls[1][2].west = WallType::Door; // razor-wall mirror
+
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, floor);
+
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 1, y: 1 },
+            Facing(Direction::East),
+            Transform::default(),
+        ));
+
+        // (1) Pre-condition: door is Closed by default — passability blocked.
+        // (Re-read the floor by handle so we can call can_move_with_doors directly.)
+        let floor_handle = app
+            .world()
+            .resource::<crate::plugins::loading::DungeonAssets>()
+            .floor_01
+            .clone();
+        let pre_passable = {
+            let floor = app
+                .world()
+                .resource::<Assets<DungeonFloor>>()
+                .get(&floor_handle)
+                .unwrap();
+            let door_states = app.world().resource::<DoorStates>();
+            crate::plugins::dungeon::can_move_with_doors(
+                floor,
+                door_states,
+                GridPosition { x: 1, y: 1 },
+                Direction::East,
+            )
+        };
+        assert!(
+            !pre_passable,
+            "default-Closed Door at (1,1) east must block movement"
+        );
+
+        // (2) Press Interact (F) — toggles Closed → Open.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::Interact);
+        app.update();
+
+        let key = (GridPosition { x: 1, y: 1 }, Direction::East);
+        assert_eq!(
+            app.world()
+                .resource::<DoorStates>()
+                .doors
+                .get(&key)
+                .copied(),
+            Some(DoorState::Open),
+            "F press at (1,1) facing East should set DoorState to Open"
+        );
+
+        // (3) Post-condition: door now passable, player can move east.
+        let post_passable = {
+            let floor = app
+                .world()
+                .resource::<Assets<DungeonFloor>>()
+                .get(&floor_handle)
+                .unwrap();
+            let door_states = app.world().resource::<DoorStates>();
+            crate::plugins::dungeon::can_move_with_doors(
+                floor,
+                door_states,
+                GridPosition { x: 1, y: 1 },
+                Direction::East,
+            )
+        };
+        assert!(
+            post_passable,
+            "after F press, Door at (1,1) east must be passable"
         );
     }
 
