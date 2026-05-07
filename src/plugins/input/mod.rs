@@ -45,7 +45,10 @@
 //! app.add_systems(Update, handle_dungeon_movement.run_if(in_state(GameState::Dungeon)));
 //! ```
 
+use bevy::input::ButtonState;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
+use leafwing_input_manager::plugin::InputManagerSystem;
 use leafwing_input_manager::prelude::*;
 
 /// Menu-style navigation actions. Used in TitleScreen, Town, GameOver,
@@ -109,7 +112,74 @@ impl Plugin for ActionsPlugin {
         .init_resource::<ActionState<CombatAction>>()
         .insert_resource(default_menu_input_map())
         .insert_resource(default_dungeon_input_map())
-        .insert_resource(default_combat_input_map());
+        .insert_resource(default_combat_input_map())
+        // Layout-aware logical-key binding — supplements the physical
+        // KeyCode bindings above with OS-layout-aware letter matching.
+        // See `apply_logical_key_bindings` for rationale.
+        //
+        // Runs in `InputManagerSystem::ManualControl`, which leafwing orders
+        // .after(Tick) and .after(Update) — so the press_at_tick we set is
+        // the current tick and `just_pressed` returns true in the same Update
+        // schedule that consumers run in.
+        .add_systems(
+            PreUpdate,
+            apply_logical_key_bindings.in_set(InputManagerSystem::ManualControl),
+        );
+    }
+}
+
+/// Layout-aware key handler.
+///
+/// `leafwing-input-manager`'s `KeyCode` bindings are PHYSICAL — they identify
+/// keys by their position on a US-QWERTY layout, regardless of the user's
+/// current OS layout. That's the right call for ergonomic movement (WASD stays
+/// at the same finger positions on every layout) but it means the keycap
+/// LABELED `F` on a Dvorak (or AZERTY, etc.) layout fires a different
+/// `KeyCode` than `KeyF` — leaving Dvorak users unable to interact.
+///
+/// This system reads `KeyboardInput` messages, inspects each event's
+/// `logical_key` (the OS-translated character), and presses the matching
+/// `ActionState`. It runs in `PreUpdate` alongside `leafwing`'s own input
+/// translation, so the resulting `just_pressed` is observable by any consumer
+/// in `Update`.
+///
+/// Both physical and logical bindings coexist: on QWERTY, both fire the
+/// action (idempotent — pressing twice doesn't re-toggle `just_pressed`).
+/// On Dvorak/AZERTY/Colemak, the logical binding fires from the LETTER-keycap
+/// while the physical binding still fires from the QWERTY-position-keycap —
+/// so players can choose either ergonomic-position OR letter-label muscle
+/// memory.
+fn apply_logical_key_bindings(
+    mut events: MessageReader<KeyboardInput>,
+    mut dungeon: ResMut<ActionState<DungeonAction>>,
+) {
+    for event in events.read() {
+        let Key::Character(text) = &event.logical_key else {
+            continue;
+        };
+        let pressed = event.state == ButtonState::Pressed;
+        // Match the LETTERS bound in default_dungeon_input_map below.
+        // Special keys (arrows, Tab, Escape) come through as `Key::ArrowUp` etc.,
+        // not `Key::Character`, so the existing physical bindings handle those.
+        match text.as_str().to_ascii_lowercase().as_str() {
+            "f" => press_or_release(&mut dungeon, DungeonAction::Interact, pressed),
+            "m" => press_or_release(&mut dungeon, DungeonAction::OpenMap, pressed),
+            "w" => press_or_release(&mut dungeon, DungeonAction::MoveForward, pressed),
+            "a" => press_or_release(&mut dungeon, DungeonAction::StrafeLeft, pressed),
+            "s" => press_or_release(&mut dungeon, DungeonAction::MoveBackward, pressed),
+            "d" => press_or_release(&mut dungeon, DungeonAction::StrafeRight, pressed),
+            "q" => press_or_release(&mut dungeon, DungeonAction::TurnLeft, pressed),
+            "e" => press_or_release(&mut dungeon, DungeonAction::TurnRight, pressed),
+            _ => {}
+        }
+    }
+}
+
+fn press_or_release<A: Actionlike>(state: &mut ActionState<A>, action: A, pressed: bool) {
+    if pressed {
+        state.press(&action);
+    } else {
+        state.release(&action);
     }
 }
 
