@@ -1,9 +1,9 @@
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use druum::plugins::{
-    audio::AudioPlugin, combat::CombatPlugin, dungeon::DungeonPlugin, input::ActionsPlugin,
-    loading::LoadingPlugin, party::PartyPlugin, save::SavePlugin, state::StatePlugin,
-    town::TownPlugin, ui::UiPlugin,
+    audio::AudioPlugin, combat::CombatPlugin, dungeon::DungeonPlugin,
+    dungeon::features::CellFeaturesPlugin, input::ActionsPlugin, loading::LoadingPlugin,
+    party::PartyPlugin, save::SavePlugin, state::StatePlugin, town::TownPlugin, ui::UiPlugin,
 };
 
 fn main() {
@@ -30,6 +30,7 @@ fn main() {
             TownPlugin,
             UiPlugin,
             AudioPlugin,
+            CellFeaturesPlugin,
             SavePlugin,
         ))
         .run();

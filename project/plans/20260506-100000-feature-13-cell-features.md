@@ -338,7 +338,7 @@ Two SFX variants (D10-A: `SpinnerWhoosh` + `DoorClose`) plus their `.ogg` placeh
 
 Land the entire scaffolding for the new file in one phase, with no Bevy systems wired yet. This is the bulk of the new LOC (~150 lines) and includes 4 Layer-1 unit tests that exercise the type machinery without an `App`.
 
-- [ ] Create `src/plugins/dungeon/features.rs` (NEW file). Add the file-level doc comment summarizing the module's purpose and pointing at the research doc:
+- [x] Create `src/plugins/dungeon/features.rs` (NEW file). Add the file-level doc comment summarizing the module's purpose and pointing at the research doc:
 
   ```rust
   //! Cell-feature reaction layer — Feature #13.
@@ -357,7 +357,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
   //! `TeleportRequested` and `EncounterRequested` derive `Message`, NOT `Event`.
   //! Read with `MessageReader<T>`, write with `MessageWriter<T>`.
   ```
-- [ ] Add imports:
+- [x] Add imports:
 
   ```rust
   use bevy::prelude::*;
@@ -380,7 +380,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
   };
   use crate::plugins::state::GameState;
   ```
-- [ ] Define `DoorState` enum (Pitfall 5 — `#[default] Closed`):
+- [x] Define `DoorState` enum (Pitfall 5 — `#[default] Closed`):
 
   ```rust
   /// State of a single door edge. Default `Closed` — `WallType::Door` walls
@@ -393,7 +393,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       Open,
   }
   ```
-- [ ] Define `DoorStates` resource:
+- [x] Define `DoorStates` resource:
 
   ```rust
   /// Per-floor-instance door state (D1-A — cleared on `OnExit(Dungeon)`).
@@ -403,7 +403,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       pub doors: HashMap<(GridPosition, Direction), DoorState>,
   }
   ```
-- [ ] Define `LockedDoors` resource:
+- [x] Define `LockedDoors` resource:
 
   ```rust
   /// Maps locked-door edges to their `door_id` strings. Populated on
@@ -415,7 +415,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       pub by_edge: HashMap<(GridPosition, Direction), String>,
   }
   ```
-- [ ] Define `PendingTeleport` resource (D3-α):
+- [x] Define `PendingTeleport` resource (D3-α):
 
   ```rust
   /// Pending cross-floor teleport destination. Set by `apply_teleporter`
@@ -427,7 +427,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       pub target: Option<TeleportTarget>,
   }
   ```
-- [ ] Define `AntiMagicZone` marker component (D4):
+- [x] Define `AntiMagicZone` marker component (D4):
 
   ```rust
   /// Marker on the `PlayerParty` entity while standing in a
@@ -437,7 +437,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
   #[derive(Component, Debug, Clone, Copy)]
   pub struct AntiMagicZone;
   ```
-- [ ] Define `ScreenWobble` component (D6-A):
+- [x] Define `ScreenWobble` component (D6-A):
 
   ```rust
   /// In-flight screen-wobble animation attached to the `PlayerParty` entity
@@ -450,7 +450,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       pub amplitude: f32,
   }
   ```
-- [ ] Define `TeleportRequested` message (D3-α):
+- [x] Define `TeleportRequested` message (D3-α):
 
   ```rust
   /// Published by `apply_teleporter` for cross-floor teleporter cells (and
@@ -463,7 +463,7 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       pub target: TeleportTarget,
   }
   ```
-- [ ] Define `EncounterRequested` message + `EncounterSource` enum (D5):
+- [x] Define `EncounterRequested` message + `EncounterSource` enum (D5):
 
   ```rust
   /// Published by `apply_alarm_trap` (and future random-encounter rolls).
@@ -482,14 +482,14 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       // Future: Random (foe roll), Foe (overworld encounter) — surface in #16.
   }
   ```
-- [ ] Add the `CellFeaturesPlugin` STRUCT only (no `Plugin` impl yet — Phase 5):
+- [x] Add the `CellFeaturesPlugin` STRUCT only (no `Plugin` impl yet — Phase 5):
 
   ```rust
   /// Owns all cell-feature systems, resources, and messages for #13.
   /// Registered in `main.rs` parallel to `DungeonPlugin`/`PartyPlugin`.
   pub struct CellFeaturesPlugin;
   ```
-- [ ] Add a `#[cfg(test)] mod tests` block with 4 Layer-1 tests (no `App` required):
+- [x] Add a `#[cfg(test)] mod tests` block with 4 Layer-1 tests (no `App` required):
 
   ```rust
   #[cfg(test)]
@@ -528,8 +528,8 @@ Land the entire scaffolding for the new file in one phase, with no Bevy systems 
       }
   }
   ```
-- [ ] In `src/plugins/dungeon/mod.rs`, add `pub mod features;` directly after the existing module declarations (e.g., after `use crate::plugins::state::GameState;` or wherever module decls live in the file — verify the location with `head -50 src/plugins/dungeon/mod.rs` at impl time). This makes the new module compilable as part of the dungeon plugin tree.
-- [ ] **Verification (atomic commit boundary):**
+- [x] In `src/plugins/dungeon/mod.rs`, add `pub mod features;` directly after the existing module declarations (e.g., after `use crate::plugins::state::GameState;` or wherever module decls live in the file — verify the location with `head -50 src/plugins/dungeon/mod.rs` at impl time). This makes the new module compilable as part of the dungeon plugin tree.
+- [x] **Verification (atomic commit boundary):**
   - `cargo build` — succeeds (the new types compile in isolation).
   - `cargo test plugins::dungeon::features::tests` — passes (4 Layer-1 tests).
   - `cargo test` — full suite passes.

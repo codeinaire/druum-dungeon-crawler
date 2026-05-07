@@ -93,7 +93,7 @@ pub struct DungeonCamera;
 
 /// Logical grid position. Updated immediately on input-commit; the visual
 /// `Transform` catches up via `MovementAnimation`.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GridPosition {
     pub x: u32,
     pub y: u32,
@@ -841,6 +841,8 @@ fn despawn_debug_grid_hud(mut commands: Commands, hud: Query<Entity, With<DebugG
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+pub mod features;
 
 #[cfg(test)]
 mod tests;
