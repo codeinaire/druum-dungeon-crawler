@@ -818,3 +818,53 @@ fn can_move_with_doors_passes_open_door() {
         "DoorState::Open allows passage of WallType::Door"
     );
 }
+
+/// Default empty DoorStates + WallType::LockedDoor east of (0,0) → blocked.
+/// Pitfall 9: LockedDoor's `floor.can_move` returns false; the wrapper must
+/// honor that for default-Closed (no override yet).
+#[test]
+fn can_move_with_doors_blocks_closed_locked_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::DoorStates;
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::LockedDoor;
+
+    let door_states = DoorStates::default();
+    assert!(
+        !super::can_move_with_doors(
+            &floor,
+            &door_states,
+            GridPosition { x: 0, y: 0 },
+            Direction::East
+        ),
+        "Default DoorState::Closed should block WallType::LockedDoor"
+    );
+}
+
+/// DoorStates[(0,0) East] = Open + WallType::LockedDoor → passable.
+/// Pitfall 9: LockedDoor's `floor.can_move` returns false; the wrapper MUST
+/// override that when DoorStates says Open (post-unlock via handle_door_interact).
+#[test]
+fn can_move_with_doors_passes_unlocked_door() {
+    use crate::data::dungeon::WallType;
+    use crate::plugins::dungeon::features::{DoorState, DoorStates};
+
+    let mut floor = make_open_floor(2, 2);
+    floor.walls[0][0].east = WallType::LockedDoor;
+
+    let mut door_states = DoorStates::default();
+    door_states.doors.insert(
+        (GridPosition { x: 0, y: 0 }, Direction::East),
+        DoorState::Open,
+    );
+    assert!(
+        super::can_move_with_doors(
+            &floor,
+            &door_states,
+            GridPosition { x: 0, y: 0 },
+            Direction::East
+        ),
+        "DoorState::Open must override floor.can_move=false for WallType::LockedDoor (Pitfall 9)"
+    );
+}

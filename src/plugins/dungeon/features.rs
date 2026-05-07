@@ -25,6 +25,7 @@ use crate::data::dungeon::{Direction, TeleportTarget, TrapType, WallType};
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::dungeon::{
     Facing, GridPosition, MovedEvent, PlayerParty, animate_movement, handle_dungeon_input,
+    spawn_party_and_camera,
 };
 use crate::plugins::input::DungeonAction;
 use crate::plugins::loading::DungeonAssets;
@@ -87,11 +88,18 @@ pub struct AntiMagicZone;
 /// In-flight screen-wobble animation attached to the `PlayerParty` entity
 /// after a spinner trigger. Lifecycle mirrors `MovementAnimation`'s
 /// remove-on-completion pattern. Damped sine: `amplitude × sin(8πt) × (1 − t)`.
+///
+/// `last_applied_jitter` tracks the previous frame's Z-rotation contribution so
+/// `tick_screen_wobble` can apply the SIGNED DELTA each frame instead of compounding.
+/// This composes cleanly with `animate_movement`'s rotation tween and produces
+/// zero rotation drift after the wobble completes (envelope→0 ⇒ jitter→0 ⇒
+/// final delta cancels the prior jitter).
 #[derive(Component, Debug, Clone)]
 pub struct ScreenWobble {
     pub elapsed_secs: f32,
     pub duration_secs: f32,
     pub amplitude: f32,
+    pub last_applied_jitter: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +147,13 @@ impl Plugin for CellFeaturesPlugin {
             .init_resource::<PendingTeleport>()
             .add_message::<TeleportRequested>()
             .add_message::<EncounterRequested>()
-            .add_systems(OnEnter(GameState::Dungeon), populate_locked_doors)
+            .add_systems(
+                OnEnter(GameState::Dungeon),
+                // .before(spawn_party_and_camera) is intentional:
+                // spawn_party_and_camera calls `pt.target.take()`, so populate
+                // must peek at the floor number BEFORE that take() clears it.
+                populate_locked_doors.before(spawn_party_and_camera),
+            )
             .add_systems(OnExit(GameState::Dungeon), clear_door_resources)
             .add_systems(
                 Update,
@@ -190,10 +204,11 @@ fn populate_locked_doors(
     let Some(assets) = dungeon_assets else {
         return;
     };
-    // Phase 8: use the active floor number from PendingTeleport if set.
-    // PendingTeleport.target.take() is called by spawn_party_and_camera, which
-    // runs first in OnEnter(Dungeon). Both systems are in the same schedule so
-    // we peek at the target (read-only) rather than taking it here.
+    // Read-only peek at the active floor number. This system is ordered
+    // .before(spawn_party_and_camera) so that spawn's `pt.target.take()`
+    // hasn't fired yet — the target is still Some(_) for cross-floor
+    // teleports. Falls back to floor 1 when no teleport is in flight
+    // (initial dungeon entry).
     let active_floor_number = pending_teleport
         .as_ref()
         .and_then(|pt| pt.target.as_ref().map(|t| t.floor))
@@ -209,16 +224,19 @@ fn populate_locked_doors(
     }
 }
 
-/// Clear all door-related resources on `OnExit(Dungeon)`.
+/// Clear door-state resources on `OnExit(Dungeon)`.
 /// Prevents stale door states from leaking to future floor visits (D1 — per-floor-instance).
+///
+/// Does NOT clear `PendingTeleport` — that resource carries the cross-floor
+/// destination ACROSS the `OnExit(Dungeon) → OnEnter(Dungeon)` boundary.
+/// The authoritative consumer is `spawn_party_and_camera`, which calls
+/// `pt.target.take()` once it has used the destination.
 fn clear_door_resources(
     mut door_states: ResMut<DoorStates>,
     mut locked_doors: ResMut<LockedDoors>,
-    mut pending_teleport: ResMut<PendingTeleport>,
 ) {
     door_states.doors.clear();
     locked_doors.by_edge.clear();
-    pending_teleport.target = None;
 }
 
 // ---------------------------------------------------------------------------
@@ -535,12 +553,19 @@ fn apply_spinner(
             elapsed_secs: 0.0,
             duration_secs: 0.2,
             amplitude: 0.15, // radians
+            last_applied_jitter: 0.0,
         });
     }
 }
 
 /// Tick the screen-wobble animation. Damped sine: `amplitude × sin(8πt) × (1 − t)`.
-/// Runs `.after(animate_movement)` to win the rotation last-write race.
+/// Runs `.after(animate_movement)` so movement-tween rotation is settled before
+/// we layer the wobble on top.
+///
+/// Applies the SIGNED DELTA between this frame's jitter and the previous frame's,
+/// so the wobble composes with `animate_movement`'s rotation without compounding.
+/// When the envelope reaches zero (t = 1), `jitter = 0` and `delta = -last_applied`
+/// — the final tick exactly cancels the residual rotation. Zero drift.
 fn tick_screen_wobble(
     mut commands: Commands,
     time: Res<Time>,
@@ -552,7 +577,9 @@ fn tick_screen_wobble(
         let envelope = (1.0 - t).max(0.0);
         let oscillation = (8.0 * std::f32::consts::PI * t).sin();
         let jitter = wobble.amplitude * envelope * oscillation;
-        transform.rotation *= Quat::from_rotation_z(jitter);
+        let delta = jitter - wobble.last_applied_jitter;
+        transform.rotation *= Quat::from_rotation_z(delta);
+        wobble.last_applied_jitter = jitter;
         if t >= 1.0 {
             commands.entity(entity).remove::<ScreenWobble>();
         }
@@ -659,7 +686,16 @@ mod app_tests {
 
     /// Build a minimal test app with DungeonPlugin + CellFeaturesPlugin + PartyPlugin.
     /// Mirrors dungeon/tests.rs::make_test_app() but adds CellFeaturesPlugin and PartyPlugin.
+    ///
+    /// `ActionState<DungeonAction>` is inserted as a bare resource WITHOUT
+    /// `ActionsPlugin` — the included `InputManagerPlugin` would tick the
+    /// state in `PreUpdate` and clear `just_pressed` before our systems read
+    /// it (same pattern as minimap.rs:580 — "ActionState alone — no
+    /// InputManagerPlugin tick eats just_pressed").
     fn make_test_app() -> App {
+        use crate::plugins::input::DungeonAction;
+        use leafwing_input_manager::prelude::ActionState;
+
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -667,11 +703,15 @@ mod app_tests {
             StatesPlugin,
             InputPlugin,
             StatePlugin,
-            crate::plugins::input::ActionsPlugin,
             DungeonPlugin,
             CellFeaturesPlugin,
             PartyPlugin,
         ));
+        // ActionState<DungeonAction> read by DungeonPlugin::handle_dungeon_input
+        // and CellFeaturesPlugin::handle_door_interact. Inserted without
+        // InputManagerPlugin so .press() in tests is observable in the Update
+        // schedule of the same frame.
+        app.init_resource::<ActionState<DungeonAction>>();
         // DungeonFloor asset type needed for floor handle lookups.
         app.init_asset::<DungeonFloor>();
         // ItemDb needed by PartyPlugin's populate_item_handle_registry (runs on OnExit(Loading)).
@@ -1119,6 +1159,79 @@ mod app_tests {
         assert!(
             !app.world().entity(party).contains::<AntiMagicZone>(),
             "AntiMagicZone component should be removed on exit"
+        );
+    }
+
+    // --- door_interact_toggles_closed_to_open ---
+
+    #[test]
+    fn door_interact_toggles_closed_to_open() {
+        use crate::data::dungeon::WallType;
+        use crate::plugins::input::DungeonAction;
+        use leafwing_input_manager::prelude::ActionState;
+
+        // 2x2 floor with WallType::Door east of (0, 0).
+        let mut floor = DungeonFloor {
+            name: "test".into(),
+            width: 2,
+            height: 2,
+            floor_number: 1,
+            walls: vec![vec![WallMask::default(); 2]; 2],
+            features: vec![vec![CellFeatures::default(); 2]; 2],
+            entry_point: (0, 0, Direction::East),
+            encounter_table: "test_table".into(),
+            lighting: LightingConfig::default(),
+            locked_doors: Vec::new(),
+        };
+        floor.walls[0][0].east = WallType::Door;
+
+        let mut app = make_test_app();
+        advance_into_dungeon(&mut app);
+        insert_test_floor(&mut app, floor);
+
+        app.world_mut().spawn((
+            PlayerParty,
+            GridPosition { x: 0, y: 0 },
+            Facing(Direction::East),
+            Transform::default(),
+        ));
+
+        // Default DoorStates is empty — door starts Closed (Pitfall 4 / D15).
+        // Press Interact to toggle.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::Interact);
+        app.update();
+
+        let key = (GridPosition { x: 0, y: 0 }, Direction::East);
+        assert_eq!(
+            app.world()
+                .resource::<DoorStates>()
+                .doors
+                .get(&key)
+                .copied(),
+            Some(DoorState::Open),
+            "Interact press on Door should toggle Closed → Open"
+        );
+
+        // Release Interact, press again — should toggle Open → Closed.
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .release(&DungeonAction::Interact);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionState<DungeonAction>>()
+            .press(&DungeonAction::Interact);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<DoorStates>()
+                .doors
+                .get(&key)
+                .copied(),
+            Some(DoorState::Closed),
+            "Second Interact press on Door should toggle Open → Closed"
         );
     }
 
