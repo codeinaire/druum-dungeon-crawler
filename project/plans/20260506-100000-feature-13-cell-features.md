@@ -240,7 +240,7 @@ The smallest possible change first: extend two schemas additively. Existing test
 
 Fill the schema additions with the actual gameplay values. Verifies via integration test extension.
 
-- [ ] In `assets/items/core.items.ron`, add `key_id: Some("rusty_door_01")` to the existing `rusty_key` entry (currently lines 100-109). Insert a new line after `icon_path`:
+- [x] In `assets/items/core.items.ron`, add `key_id: Some("rusty_door_01")` to the existing `rusty_key` entry (currently lines 100-109). Insert a new line after `icon_path`:
 
   ```ron
   (
@@ -255,7 +255,7 @@ Fill the schema additions with the actual gameplay values. Verifies via integrat
       key_id: Some("rusty_door_01"),  // <-- NEW LINE
   ),
   ```
-- [ ] In `assets/dungeons/floor_01.dungeon.ron`, append a new top-level field `locked_doors` directly before the closing parenthesis (currently line 164):
+- [x] In `assets/dungeons/floor_01.dungeon.ron`, append a new top-level field `locked_doors` directly before the closing parenthesis (currently line 164):
 
   ```ron
   )
@@ -272,7 +272,7 @@ Fill the schema additions with the actual gameplay values. Verifies via integrat
   //   Locked-door ids:
   //     "rusty_door_01" — east of (3,1) / west of (4,1) — opened by `rusty_key`
   ```
-- [ ] In `tests/item_db_loads.rs`, extend `assert_item_db_shape` (currently lines 62-118) to verify the new `key_id` field. Insert AFTER the existing `assert_eq!(key.slot, EquipSlot::None, ...)` at line 115:
+- [x] In `tests/item_db_loads.rs`, extend `assert_item_db_shape` (currently lines 62-118) to verify the new `key_id` field. Insert AFTER the existing `assert_eq!(key.slot, EquipSlot::None, ...)` at line 115:
 
   ```rust
   // Feature #13 — rusty_key carries the door_id of the locked door at floor_01:(3,1) East.
@@ -282,7 +282,7 @@ Fill the schema additions with the actual gameplay values. Verifies via integrat
       "rusty_key.key_id should be Some(\"rusty_door_01\")"
   );
   ```
-- [ ] **Verification (atomic commit boundary):**
+- [x] **Verification (atomic commit boundary):**
   - `cargo test --test item_db_loads` — passes.
   - `cargo test` — full suite passes (the existing `dungeon::tests::floor_01_loads` integration test, if present, picks up the new `locked_doors` field via `#[serde(default)]` and remains green).
   - `cargo run --features dev` — manual smoke: game reaches Dungeon without an asset-load panic. (Pitfall 10: schema change is invisible to the runtime because every consumer ignores the new fields until Phase 4-5 land.)

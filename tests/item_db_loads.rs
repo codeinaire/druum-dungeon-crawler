@@ -114,5 +114,12 @@ fn assert_item_db_shape(
     );
     assert_eq!(key.slot, EquipSlot::None, "rusty_key.slot should be None");
 
+    // Feature #13 — rusty_key carries the door_id of the locked door at floor_01:(3,1) East.
+    assert_eq!(
+        key.key_id,
+        Some("rusty_door_01".to_string()),
+        "rusty_key.key_id should be Some(\"rusty_door_01\")"
+    );
+
     exit.write(AppExit::Success);
 }
