@@ -73,6 +73,11 @@ pub struct AudioAssets {
     pub sfx_menu_click: Handle<AudioSource>,
     #[asset(path = "audio/sfx/attack_hit.ogg")]
     pub sfx_attack_hit: Handle<AudioSource>,
+    // Feature #13 additions:
+    #[asset(path = "audio/sfx/spinner_whoosh.ogg")]
+    pub sfx_spinner_whoosh: Handle<AudioSource>,
+    #[asset(path = "audio/sfx/door_close.ogg")]
+    pub sfx_door_close: Handle<AudioSource>,
 }
 
 /// Marker tag on every entity spawned by `spawn_loading_screen`.

@@ -291,7 +291,7 @@ Fill the schema additions with the actual gameplay values. Verifies via integrat
 
 Two SFX variants (D10-A: `SpinnerWhoosh` + `DoorClose`) plus their `.ogg` placeholder assets and `AudioAssets` handle slots. The match arm in `handle_sfx_requests` enforces exhaustiveness — the compiler catches any forgotten variant.
 
-- [ ] In `src/plugins/audio/sfx.rs`, add 2 variants to `SfxKind` (currently 5 variants at lines 51-57):
+- [x] In `src/plugins/audio/sfx.rs`, add 2 variants to `SfxKind` (currently 5 variants at lines 51-57):
 
   ```rust
   pub enum SfxKind {
@@ -305,7 +305,7 @@ Two SFX variants (D10-A: `SpinnerWhoosh` + `DoorClose`) plus their `.ogg` placeh
       DoorClose,
   }
   ```
-- [ ] In the same file, extend the `match req.kind` block in `handle_sfx_requests` (currently lines 78-84) with 2 arms:
+- [x] In the same file, extend the `match req.kind` block in `handle_sfx_requests` (currently lines 78-84) with 2 arms:
 
   ```rust
   let handle = match req.kind {
@@ -319,7 +319,7 @@ Two SFX variants (D10-A: `SpinnerWhoosh` + `DoorClose`) plus their `.ogg` placeh
       SfxKind::DoorClose => audio_assets.sfx_door_close.clone(),
   };
   ```
-- [ ] In `src/plugins/loading/mod.rs`, add 2 fields to `AudioAssets` (currently 10 fields at lines 50-76) directly after `sfx_attack_hit`:
+- [x] In `src/plugins/loading/mod.rs`, add 2 fields to `AudioAssets` (currently 10 fields at lines 50-76) directly after `sfx_attack_hit`:
 
   ```rust
   // Feature #13 additions:
@@ -328,8 +328,8 @@ Two SFX variants (D10-A: `SpinnerWhoosh` + `DoorClose`) plus their `.ogg` placeh
   #[asset(path = "audio/sfx/door_close.ogg")]
   pub sfx_door_close: Handle<AudioSource>,
   ```
-- [ ] Add the 2 placeholder `.ogg` files at `assets/audio/sfx/spinner_whoosh.ogg` and `assets/audio/sfx/door_close.ogg`. Per D7-A, royalty-free .ogg files committed alongside the existing 5 (verified at `loading/mod.rs:66-75`). User supplies the audio OR the implementer can suggest CC0 sources (e.g., freesound.org "spinner whoosh", "door close"). For initial development, even silent `.ogg` files are acceptable so long as they are valid OGG containers (Bevy's `AudioSource` decoder rejects empty files).
-- [ ] **Verification (atomic commit boundary):**
+- [x] Add the 2 placeholder `.ogg` files at `assets/audio/sfx/spinner_whoosh.ogg` and `assets/audio/sfx/door_close.ogg`. Per D7-A, royalty-free .ogg files committed alongside the existing 5 (verified at `loading/mod.rs:66-75`). User supplies the audio OR the implementer can suggest CC0 sources (e.g., freesound.org "spinner whoosh", "door close"). For initial development, even silent `.ogg` files are acceptable so long as they are valid OGG containers (Bevy's `AudioSource` decoder rejects empty files).
+- [x] **Verification (atomic commit boundary):**
   - `cargo check` — succeeds (the match exhaustiveness compiler check is the primary gate).
   - `cargo run --features dev` — manual smoke: game reaches Dungeon without a "missing asset" panic. (`bevy_asset_loader` blocks state advance until all `AudioAssets` handles report `LoadedWithDependencies` — if either `.ogg` is missing or invalid, the game hangs in `GameState::Loading`. Treat that as a Phase 3 verification gate.)
   - `cargo test` — full suite passes (no consumer for the new variants yet; the existing audio tests don't exercise `SfxKind::SpinnerWhoosh`/`DoorClose`).
@@ -1276,6 +1276,14 @@ The trust boundary for #13 is the on-disk `floor_*.dungeon.ron` and `core.items.
 ---
 
 ## Implementation Discoveries
+
+### D-I2 — AudioAssets struct literal in audio/mod.rs tests also needs new fields
+
+**File:** `src/plugins/audio/mod.rs`
+
+**Finding:** Same `#[cfg(test)]` struct literal issue as D-I1. `AudioAssets` in audio/mod.rs test helper `make_test_app()` needed `sfx_spinner_whoosh` and `sfx_door_close` fields added (or `..Default::default()` — but `AudioAssets` lacks `Default` derive, so explicit fields required). Added them as `h.clone()` (stub handles like the rest).
+
+**Fix applied:** Added `sfx_spinner_whoosh: h.clone()` and `sfx_door_close: h.clone()` to the stub `AudioAssets` in `audio/mod.rs` test helper. Bounded deviation in frozen file — minimum-correct fix.
 
 ### D-I1 — Plan claimed "existing tests pass unchanged" for `#[serde(default)]` fields; Rust struct literals require explicit values
 

@@ -54,6 +54,9 @@ pub enum SfxKind {
     EncounterSting,
     MenuClick,
     AttackHit,
+    // Feature #13 additions:
+    SpinnerWhoosh,
+    DoorClose,
 }
 
 /// Consumes pending `SfxRequest` messages and spawns one `(AudioPlayer,
@@ -81,6 +84,9 @@ pub fn handle_sfx_requests(
             SfxKind::EncounterSting => audio_assets.sfx_encounter_sting.clone(),
             SfxKind::MenuClick => audio_assets.sfx_menu_click.clone(),
             SfxKind::AttackHit => audio_assets.sfx_attack_hit.clone(),
+            // Feature #13 additions:
+            SfxKind::SpinnerWhoosh => audio_assets.sfx_spinner_whoosh.clone(),
+            SfxKind::DoorClose => audio_assets.sfx_door_close.clone(),
         };
         commands.spawn((
             AudioPlayer::new(handle),
