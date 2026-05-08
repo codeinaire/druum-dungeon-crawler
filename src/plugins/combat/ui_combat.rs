@@ -99,12 +99,15 @@ fn paint_combat_screen(
         .min_width(200.0)
         .show(ctx, |ui| {
             ui.heading("Enemies");
-            for (entity, name, derived, _status) in &enemies {
+            for (entity, name, derived, status) in &enemies {
                 let _ = entity;
                 ui.label(format!(
                     "{} HP {}/{}",
                     name.0, derived.current_hp, derived.max_hp
                 ));
+                if !status.effects.is_empty() {
+                    ui.label(format!("  [{}]", format_status_effects(status)));
+                }
             }
         });
 
@@ -137,9 +140,21 @@ fn paint_combat_screen(
                         .unwrap_or_default();
                     ui.horizontal(|ui| {
                         ui.label(format!("> {}", active_name));
-                        // Action buttons are advisory in v1; keyboard-driven via
-                        // handle_combat_input.
-                        ui.label("Attack | Defend | Spell | Item | Flee");
+                        // Highlight the cursor-selected action; Left/Right move it,
+                        // Confirm dispatches. Cursor index matches the order in
+                        // handle_combat_input's Main-frame match.
+                        const LABELS: [&str; 5] = ["Attack", "Defend", "Spell", "Item", "Flee"];
+                        for (i, label) in LABELS.iter().enumerate() {
+                            let color = if i == input_state.main_cursor {
+                                egui::Color32::YELLOW
+                            } else {
+                                egui::Color32::WHITE
+                            };
+                            ui.colored_label(color, *label);
+                            if i + 1 < LABELS.len() {
+                                ui.label("|");
+                            }
+                        }
                     });
                 } else {
                     ui.label("Resolving turn...");
@@ -159,7 +174,7 @@ fn paint_combat_screen(
                         ui.label(format!("HP {}/{}", derived.current_hp, derived.max_hp));
                         ui.label(format!("MP {}/{}", derived.current_mp, derived.max_mp));
                         if !status.effects.is_empty() {
-                            ui.label(format!("[{}]", status.effects.len()));
+                            ui.label(format!("[{}]", format_status_effects(status)));
                         }
                     });
                 }
@@ -185,6 +200,35 @@ fn paint_combat_screen(
     }
 
     Ok(())
+}
+
+/// Compact status-effect summary for the party / enemy panels.
+///
+/// Format per effect: `Type` (no metadata), `Type(Nt)` (turns only),
+/// `Type(×M)` (magnitude only — non-zero), or `Type(Nt ×M)` (both).
+/// Multiple effects join with `, `.
+///
+/// Examples: `Stone`, `Sleep(2t)`, `DefenseUp(2t ×0.5)`, `Poison(3t), DefenseUp(2t ×0.5)`.
+fn format_status_effects(status: &StatusEffects) -> String {
+    status
+        .effects
+        .iter()
+        .map(|e| {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(n) = e.remaining_turns {
+                parts.push(format!("{}t", n));
+            }
+            if e.magnitude != 0.0 {
+                parts.push(format!("×{:.1}", e.magnitude));
+            }
+            if parts.is_empty() {
+                format!("{:?}", e.effect_type)
+            } else {
+                format!("{:?}({})", e.effect_type, parts.join(" "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Read leafwing CombatAction (menu nav) and drive `PlayerInputState`.
@@ -237,18 +281,78 @@ fn handle_combat_input(
 
     match frame {
         MenuFrame::Main => {
-            if actions.just_pressed(&MenuNavAction::Confirm) {
-                // v1 simplification: Confirm always opens Attack → TargetSelect.
-                if enemies.iter().next().is_some() {
-                    input_state.pending_action = Some(PendingAction {
-                        kind: CombatActionKind::Attack,
-                        actor: actor_entity,
-                    });
-                    input_state.menu_stack.push(MenuFrame::TargetSelect {
-                        kind: CombatActionKind::Attack,
-                    });
-                    input_state.target_cursor = Some(0);
+            // Up/Left or Down/Right move the cursor across the 5 actions
+            // (0=Attack, 1=Defend, 2=Spell, 3=Item, 4=Flee).
+            const ACTION_COUNT: usize = 5;
+            if actions.just_pressed(&MenuNavAction::Up)
+                || actions.just_pressed(&MenuNavAction::Left)
+            {
+                input_state.main_cursor = input_state.main_cursor.saturating_sub(1);
+                return;
+            }
+            if actions.just_pressed(&MenuNavAction::Down)
+                || actions.just_pressed(&MenuNavAction::Right)
+            {
+                input_state.main_cursor = (input_state.main_cursor + 1).min(ACTION_COUNT - 1);
+                return;
+            }
+            if !actions.just_pressed(&MenuNavAction::Confirm) {
+                return;
+            }
+            // Dispatch on cursor.
+            let speed = derived.speed;
+            match input_state.main_cursor {
+                0 => {
+                    // Attack → TargetSelect (only if enemies exist).
+                    if enemies.iter().next().is_some() {
+                        input_state.pending_action = Some(PendingAction {
+                            kind: CombatActionKind::Attack,
+                            actor: actor_entity,
+                        });
+                        input_state.menu_stack.push(MenuFrame::TargetSelect {
+                            kind: CombatActionKind::Attack,
+                        });
+                        input_state.target_cursor = Some(0);
+                    }
                 }
+                1 => {
+                    // Defend → commit immediately (Self target).
+                    let qa = QueuedAction {
+                        actor: actor_entity,
+                        kind: CombatActionKind::Defend,
+                        target: TargetSelection::Self_,
+                        speed_at_queue_time: speed,
+                        actor_side: Side::Party,
+                        slot_index: active_slot as u32,
+                    };
+                    queue.queue.push(qa.clone());
+                    input_state.committed.push(qa);
+                    input_state.active_slot = None;
+                }
+                2 => {
+                    // Spell → push stub menu (handler logs and pops next frame).
+                    input_state.menu_stack.push(MenuFrame::SpellMenu);
+                }
+                3 => {
+                    // Item → push stub menu.
+                    input_state.menu_stack.push(MenuFrame::ItemMenu);
+                }
+                4 => {
+                    // Flee → commit immediately (Self target; success rolled in
+                    // execute_combat_actions).
+                    let qa = QueuedAction {
+                        actor: actor_entity,
+                        kind: CombatActionKind::Flee,
+                        target: TargetSelection::Self_,
+                        speed_at_queue_time: speed,
+                        actor_side: Side::Party,
+                        slot_index: active_slot as u32,
+                    };
+                    queue.queue.push(qa.clone());
+                    input_state.committed.push(qa);
+                    input_state.active_slot = None;
+                }
+                _ => {}
             }
         }
         MenuFrame::TargetSelect { kind } => {

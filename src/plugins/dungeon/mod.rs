@@ -233,6 +233,7 @@ impl Plugin for DungeonPlugin {
                     .chain(),
             )
             .add_systems(OnExit(GameState::Dungeon), despawn_dungeon_entities)
+            .add_systems(OnExit(GameState::Combat), cleanup_party_after_combat)
             .add_systems(
                 Update,
                 (
@@ -448,7 +449,16 @@ fn spawn_party_and_camera(
     floors: Res<Assets<DungeonFloor>>,
     active_floor: Res<ActiveFloorNumber>,
     mut pending_teleport: Option<ResMut<crate::plugins::dungeon::features::PendingTeleport>>,
+    existing_party: Query<(), With<PlayerParty>>,
 ) {
+    // Idempotent: if a PlayerParty already exists (e.g., returning from Combat),
+    // don't double-spawn. The party and its child camera persist across the
+    // `Dungeon → Combat → Dungeon` round-trip per `despawn_dungeon_entities`'s
+    // Combat-preservation rule.
+    if !existing_party.is_empty() {
+        info!("PlayerParty already exists; skipping spawn (returning from Combat or similar)");
+        return;
+    }
     let Some(assets) = dungeon_assets else {
         warn!("DungeonAssets resource not present at OnEnter(Dungeon); party spawn deferred");
         return;
@@ -551,13 +561,50 @@ fn spawn_party_and_camera(
 /// `GlobalAmbientLight` to its `LightPlugin` default so other states (Town, Combat,
 /// etc.) start with a clean ambient setting. Future states own their own ambient
 /// override on entry.
+/// `OnExit(GameState::Combat)` cleanup: despawn the persisted `PlayerParty`
+/// (and its child `Camera3d`) when leaving combat for a destination other
+/// than Dungeon. Mirror of `despawn_dungeon_entities`'s Combat-preservation
+/// rule — together they make the party live for `Dungeon ↔ Combat` and die
+/// for everything else.
+///
+/// Without this cleanup, the `Camera3d` survives into states like Loading
+/// (which spawns a `Camera2d`), producing the
+/// "Camera order ambiguities detected" warning from `bevy_render::camera`.
+fn cleanup_party_after_combat(
+    mut commands: Commands,
+    parties: Query<Entity, With<PlayerParty>>,
+    state: Res<State<GameState>>,
+) {
+    if matches!(state.get(), GameState::Dungeon) {
+        return; // Returning to dungeon — keep party alive (won/fled combat).
+    }
+    let count = parties.iter().count();
+    for e in &parties {
+        commands.entity(e).despawn();
+    }
+    if count > 0 {
+        info!(
+            "Despawned PlayerParty on OnExit(Combat) (destination={:?})",
+            state.get()
+        );
+    }
+}
+
 fn despawn_dungeon_entities(
     mut commands: Commands,
     parties: Query<Entity, With<PlayerParty>>,
     dungeon_geometry: Query<Entity, With<DungeonGeometry>>,
+    state: Res<State<GameState>>,
 ) {
-    for e in &parties {
-        commands.entity(e).despawn();
+    // Preserve PlayerParty when transitioning to Combat — combat reads party state
+    // (#15) and #16's encounter round-trip needs the same party entity to live
+    // across `Dungeon → Combat → Dungeon`. Despawn for all other destinations
+    // (Town, Loading, GameOver, TitleScreen) so re-entering Dungeon spawns fresh.
+    let preserve_party = matches!(state.get(), GameState::Combat);
+    if !preserve_party {
+        for e in &parties {
+            commands.entity(e).despawn();
+        }
     }
     for e in &dungeon_geometry {
         commands.entity(e).despawn();
@@ -565,7 +612,10 @@ fn despawn_dungeon_entities(
     // Restore default ambient light (white, brightness 80.0). Other states will
     // override again on their own OnEnter (#18 Town, future states).
     commands.insert_resource(GlobalAmbientLight::default());
-    info!("Despawned PlayerParty + dungeon geometry on OnExit(Dungeon); ambient restored");
+    info!(
+        "Despawned dungeon geometry on OnExit(Dungeon); ambient restored (party preserved={})",
+        preserve_party
+    );
 }
 
 /// `OnEnter(GameState::Dungeon)` — spawn floor + ceiling slabs per cell and wall

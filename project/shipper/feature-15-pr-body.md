@@ -106,4 +106,28 @@ The D-A5 carve-out (dropping `With<PartyMember>` from `recompute_derived_stats_o
 - [x] `cargo test silence_blocks_spell_menu` — silenced party member in slot 0 cannot navigate to `SpellMenu` (MEDIUM-1)
 - [x] `cargo test enemy_buff_re_derives_stats` — enemy with `DefenseUp 0.5` re-derives `DerivedStats.defense > 0` after `EquipmentChangedEvent` (MEDIUM-1 + D-A5 smoke test)
 
+### Manual UI smoke test
+
+Reviewers should also exercise the combat UI manually — the cargo gate above doesn't cover render/input paths.
+
+```
+cargo run --features dev
+```
+
+Press **F9** to cycle `GameState`s: `Loading → TitleScreen → Town → Dungeon → Combat`. On entering `Combat`, the dev-only `spawn_dev_encounter` (turn_manager.rs:647) auto-spawns 2 Goblins (hp=30, attack=8, defense=5, speed=6).
+
+What to look for:
+
+- [ ] **Persistent action panel** at the bottom (~60px) — D-Q2=A
+- [ ] **Combat overlay on dungeon camera** (no scene swap) — D-Q1=A
+- [ ] **Combat log** shows `--- Combat begins ---`; ring buffer cap=50 kept across combats — D-Q3=A
+- [ ] **Action menu navigation**: Attack / Defend / Spell / Item / Flee
+- [ ] **Target selection sub-menu** opens when selecting Attack
+- [ ] **Defend** writes `DefenseUp` via `ApplyStatusEvent` (visible next-turn defense buff) — D-Q4=A take-higher
+- [ ] **Speed-sorted execution**: party (varies) vs Goblin (speed=6) — D-A3=A Wizardry multiplicative damage in log
+- [ ] **Spell menu is a stub** (CastSpell deferred to #20) — selecting a spell logs but doesn't resolve
+- [ ] **No animations / camera shake** — that's #17
+
+To exercise MEDIUM-2's boss-cycle fix visually, swap one Goblin's `ai` field at `turn_manager.rs:682` to `EnemyAi::BossAttackDefendAttack { turn: 0 }` and watch the action sequence cycle Attack → Defend → Attack across 3 turns.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

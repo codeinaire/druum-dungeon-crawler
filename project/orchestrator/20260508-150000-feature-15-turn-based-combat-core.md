@@ -184,4 +184,9 @@ User chose path 1 — address both MEDIUM findings before ship. Implementer disp
 
 ### Ship
 
-User authorized shipping. Branch `feature/15-turn-based-combat-core` (matching the `feature/13-cell-features` pattern). Shipper dispatched via `run-shipper` skill; PR URL captured below.
+User authorized shipping. Branch `feature/15-turn-based-combat-core` pushed to `origin` at SHA `dcf3d51` (2 commits: `25cfad4 add core of turn based combat` + `dcf3d51 add memory and other stuff`).
+
+**PR:** https://github.com/codeinaire/druum-dungeon-crawler/pull/15
+**Title:** `feat(combat): turn-based combat core (action-queue loop)`
+**Body:** `project/shipper/feature-15-pr-body.md` (TL;DR, mermaid flow diagram, reviewer guide, scope, risk, future deps, test plan checkboxes).
+**Commit message:** `project/shipper/feature-15-commit-msg.txt`.

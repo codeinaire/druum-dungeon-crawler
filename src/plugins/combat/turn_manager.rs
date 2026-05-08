@@ -121,6 +121,9 @@ pub struct PlayerInputState {
     pub pending_action: Option<PendingAction>,
     /// Target cursor for arrow-driven selection.
     pub target_cursor: Option<usize>,
+    /// Cursor for the Main action panel: 0=Attack, 1=Defend, 2=Spell, 3=Item, 4=Flee.
+    /// Reset to 0 each time `active_slot` changes (per-member fresh state).
+    pub main_cursor: usize,
     /// Round counter (passed to combat_log entries for filtering).
     pub current_turn: u32,
 }
@@ -235,6 +238,13 @@ fn collect_player_actions(
     party: Query<(Entity, &PartySlot, &DerivedStats, &StatusEffects), With<PartyMember>>,
     mut next_phase: ResMut<NextState<CombatPhase>>,
 ) {
+    // Don't advance the phase when no party entities exist at all — a transient
+    // state during dev-cycle teleports or test-harness setup. Without this guard,
+    // an empty party falls through to `ExecuteActions` → `TurnResult` and triggers
+    // `check_victory_defeat_flee`'s defeat path.
+    if party.is_empty() {
+        return;
+    }
     // Snapshot alive & non-incapacitated party members, sorted by slot.
     let mut alive_slots: Vec<(Entity, usize)> = party
         .iter()
@@ -276,6 +286,7 @@ fn collect_player_actions(
         if input_state.active_slot != Some(*slot) {
             input_state.active_slot = Some(*slot);
             input_state.menu_stack = vec![MenuFrame::Main];
+            input_state.main_cursor = 0;
         }
         return; // Wait for UI to commit.
     }
@@ -584,9 +595,13 @@ fn check_victory_defeat_flee(
     mut combat_log: ResMut<CombatLog>,
     mut input_state: ResMut<PlayerInputState>,
 ) {
-    let all_party_dead = party
-        .iter()
-        .all(|(d, s)| d.current_hp == 0 || s.has(StatusEffectType::Dead));
+    // Guard against `Iterator::all()` vacuous-truth on empty party (resolves LOW-2):
+    // an absent party is a transient state (e.g., between dungeon-exit and combat
+    // setup), not a defeat condition.
+    let all_party_dead = !party.is_empty()
+        && party
+            .iter()
+            .all(|(d, s)| d.current_hp == 0 || s.has(StatusEffectType::Dead));
     let enemy_count = enemies.iter().count();
     let all_enemies_dead = enemy_count > 0
         && enemies
