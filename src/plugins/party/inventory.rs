@@ -431,19 +431,26 @@ pub fn give_item(
 /// `derive_stats` returns `current_hp = max_hp`. After a re-derive, we clamp
 /// `current_hp = old_current_hp.min(new_max_hp)` to avoid instant-refill when
 /// equipping a high-VIT item mid-combat.
+///
+/// **#15 carve-out (D-A5):** the original `With<PartyMember>` filter was
+/// dropped so this same recompute system applies to enemy entities as well.
+/// Enemies spawn with `Equipment::default()` and `Experience::default()`
+/// (see `combat/enemy.rs::EnemyBundle`) so the query shape matches. The
+/// flatten step over `Equipment` slots is a no-op for empty equipment,
+/// so the system simply re-runs `derive_stats` for any character receiving
+/// an `EquipmentChangedEvent` — including buffs/debuffs applied via
+/// the `EquipSlot::None` sentinel from #14's `apply_status_handler`
+/// (Pitfall 11 of #15).
 pub fn recompute_derived_stats_on_equipment_change(
     mut events: MessageReader<EquipmentChangedEvent>,
     items: Res<Assets<ItemAsset>>,
-    mut characters: Query<
-        (
-            &BaseStats,
-            &Equipment,
-            &StatusEffects,
-            &Experience,
-            &mut DerivedStats,
-        ),
-        With<PartyMember>,
-    >,
+    mut characters: Query<(
+        &BaseStats,
+        &Equipment,
+        &StatusEffects,
+        &Experience,
+        &mut DerivedStats,
+    )>,
 ) {
     for ev in events.read() {
         let Ok((base, equip, status, xp, mut derived)) = characters.get_mut(ev.character) else {

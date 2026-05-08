@@ -4,3 +4,4 @@
 - [Bevy 0.18 despawn() is recursive](feedback_bevy_018_despawn_is_recursive.md) — commands.entity(e).despawn() in 0.18 recursively despawns all children; do not flag parent despawns as missing child cleanup
 - [Explicit impl Default for semantic config structs](feedback_explicit_impl_default_for_semantic_config.md) — Use explicit impl Default (not #[derive]) when f32 defaults must be non-zero (density 0 = no fog, brightness 0 = black); verify and flag any config struct where derive would give wrong atmospheric defaults
 - [GitHub own-PR review limitation](feedback_own_pr_review_limitation.md) — REQUEST_CHANGES blocked on own PR; use gh pr review --comment instead; note this in review summary
+- [impl Trait + ?Sized for dyn RNG args](feedback_rust_impl_trait_sized_dyn.md) — `rng: &mut impl Rng` cannot accept `&mut dyn RngCore`; use `&mut (impl Rng + ?Sized)` when the caller holds a `Box<dyn RngCore>`
