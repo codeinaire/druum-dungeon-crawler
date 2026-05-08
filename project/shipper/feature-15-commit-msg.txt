@@ -1,0 +1,19 @@
+feat(combat): turn-based combat core (action-queue loop)
+
+Implements Feature #15 from the roadmap — action-queue combat resolution.
+
+- 8 new files under src/plugins/combat/
+- TurnManagerPlugin + EnemyAiPlugin + CombatUiPlugin sub-plugins
+- Pure damage_calc (Wizardry multiplicative formula); ai.rs emits to queue only
+- Defend writes DefenseUp via #14's ApplyStatusEvent (take-higher rule)
+- CastSpell stubbed (deferred to #20); CurrentEncounter via test fixtures (#16)
+- BossAi enum stub for #17 (BossFocusWeakest, BossAttackDefendAttack)
+- D-A5 carve-out: drop With<PartyMember> from recompute_derived_stats_on_equipment_change
+
+Verification: 191 default tests / 194 dev / clippy clean / fmt clean.
+
+Both MEDIUM review findings resolved:
+- MEDIUM-1: four plan-mandated tests added
+- MEDIUM-2: BossAttackDefendAttack turn counter increment + cycle test
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
