@@ -2364,6 +2364,8 @@ dependencies = [
  "bevy_common_assets",
  "bevy_egui",
  "leafwing-input-manager",
+ "rand",
+ "rand_chacha",
  "ron 0.12.1",
  "serde",
 ]

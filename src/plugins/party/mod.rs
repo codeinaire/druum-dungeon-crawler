@@ -100,6 +100,21 @@ fn spawn_default_debug_party(
     }
 
     // Hardcoded 4-member roster: Fighter / Mage / Priest / Fighter (Human, all).
+    // BaseStats values are mid-tier-but-survivable for the dev smoke test —
+    // VIT=12 yields 17 max_hp at level 1 (enough to survive 2-3 Goblin hits in
+    // `spawn_dev_encounter`). Without these explicit values, `..Default::default()`
+    // would give `BaseStats::ZERO` AND `DerivedStats::default()` (all zeros), and
+    // combat's `check_victory_defeat_flee` would see `current_hp == 0` for every
+    // member and immediately decide defeat.
+    let base = BaseStats {
+        strength: 10,
+        intelligence: 8,
+        piety: 8,
+        vitality: 12,
+        agility: 10,
+        luck: 6,
+    };
+
     let roster = [
         ("Aldric", Class::Fighter, PartyRow::Front),
         ("Mira", Class::Mage, PartyRow::Front),
@@ -109,6 +124,7 @@ fn spawn_default_debug_party(
 
     let count = debug_party_count(party_size.0);
     for (i, (name, class, row)) in roster.iter().enumerate().take(count) {
+        let derived = derive_stats(&base, &[], &StatusEffects::default(), 1);
         commands
             .spawn(PartyMemberBundle {
                 name: CharacterName((*name).into()),
@@ -116,6 +132,8 @@ fn spawn_default_debug_party(
                 race: Race::Human,
                 party_row: *row,
                 party_slot: PartySlot(i),
+                base_stats: base,
+                derived_stats: derived,
                 ..Default::default()
             })
             // Feature #12: each party member carries its own bag (Wizardry-style).

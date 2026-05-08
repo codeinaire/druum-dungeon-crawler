@@ -1,0 +1,18 @@
+fix(combat): UseItem heal invariants (review findings)
+
+- Add `check_dead_and_apply` after the heal HP write in the UseItem
+  consumable arm (MEDIUM). The plan mandates every HP write pair with
+  `check_dead_and_apply`; heals are monotonically increasing so this
+  never triggers today, but the contract holds for any future
+  drain-type consumable or test fixture that hits this path.
+
+- Short-circuit zero-heal items (LOW). `max_hp / 4` truncates to 0
+  when `max_hp < 4`; without this guard the item is consumed AND a
+  "drinks X!" log fires even though HP is unchanged. `heal` is now
+  computed up-front; if zero, the arm `continue`s without mutating
+  inventory or emitting a log.
+
+Both findings from `project/reviews/20260508-180000-feature-15-pr-review.md`.
+194 tests pass; clippy clean; fmt clean.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
