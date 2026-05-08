@@ -190,8 +190,19 @@ pub struct Inventory(pub Vec<Entity>);
 // EquipmentChangedEvent — Message (Bevy 0.18 rename)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Emitted by `equip_item` and `unequip_item` when a character's equipment
-/// changes. Triggers `recompute_derived_stats_on_equipment_change`.
+/// Emitted by:
+///
+/// - `equip_item` and `unequip_item` (`inventory.rs`) — equipment slot
+///   changed.
+/// - `apply_status_handler` (Feature #14, `combat/status_effects.rs`) when a
+///   status change affects derived stats (`AttackUp`/`DefenseUp`/`SpeedUp`/
+///   `Dead`). The `slot` field is `EquipSlot::None` in that case (sentinel
+///   for "stat-changed, source not an equipment slot").
+/// - `tick_status_durations` (#14) when an expiring effect was a stat-
+///   modifier — same `EquipSlot::None` sentinel.
+///
+/// Triggers `recompute_derived_stats_on_equipment_change`, which re-runs
+/// `derive_stats` (which sees the new buff branches in #14).
 ///
 /// **`#[derive(Message)]`, NOT `#[derive(Event)]`** — Bevy 0.18 family rename.
 /// Use `MessageReader<EquipmentChangedEvent>` to subscribe, and
@@ -200,6 +211,8 @@ pub struct Inventory(pub Vec<Entity>);
 ///
 /// The `...Event` suffix is a genre-familiarity convention that matches
 /// `MovedEvent`; `SfxRequest` is the counter-example (message without suffix).
+/// **Naming impurity acknowledged** (the type also fires for non-equipment
+/// stat changes after #14); rename deferred to #25 polish.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct EquipmentChangedEvent {
     pub character: Entity,

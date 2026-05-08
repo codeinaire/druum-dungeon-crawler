@@ -36,6 +36,7 @@ use bevy_common_assets::ron::RonAssetPlugin;
 
 use druum::data::{DungeonFloor, ItemDb};
 use druum::plugins::audio::SfxRequest;
+use druum::plugins::combat::CombatPlugin;
 use druum::plugins::dungeon::features::CellFeaturesPlugin;
 use druum::plugins::dungeon::{DungeonGeometry, DungeonPlugin};
 use druum::plugins::input::ActionsPlugin;
@@ -72,6 +73,7 @@ fn dungeon_geometry_spawns_for_floor_01() {
         DungeonPlugin,
         CellFeaturesPlugin,
         PartyPlugin,
+        CombatPlugin,
     ));
 
     // spawn_dungeon_geometry requires Assets<Mesh> and Assets<StandardMaterial>.
