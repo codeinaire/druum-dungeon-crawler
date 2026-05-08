@@ -537,6 +537,17 @@ fn execute_combat_actions(
                 // Decision 30: consumables heal max_hp / 4.
                 if asset.kind == crate::plugins::party::ItemKind::Consumable {
                     let display_name = asset.display_name.clone();
+                    // Compute heal up-front so we can short-circuit zero-heal items
+                    // (max_hp < 4 → integer division yields 0). Without this guard
+                    // the item is consumed and a misleading "drinks X!" log fires
+                    // even though HP is unchanged.
+                    let heal = derived_mut
+                        .get(action.actor)
+                        .map(|d| d.max_hp / 4)
+                        .unwrap_or(0);
+                    if heal == 0 {
+                        continue;
+                    }
                     // Find and remove the item instance from the actor's inventory.
                     let _removed_entity =
                         if let Ok(mut inventory) = inventories.get_mut(action.actor) {
@@ -553,10 +564,13 @@ fn execute_combat_actions(
                         } else {
                             None
                         };
-                    // Heal the actor (max_hp / 4).
+                    // Heal the actor (max_hp / 4). Plan invariant: every HP write
+                    // pairs with `check_dead_and_apply`. Heals are monotonically
+                    // increasing so this never fires today, but the contract holds
+                    // for any future drain-type consumable or test fixture.
                     if let Ok(mut d) = derived_mut.get_mut(action.actor) {
-                        let heal = d.max_hp / 4;
                         d.current_hp = d.current_hp.saturating_add(heal).min(d.max_hp);
+                        check_dead_and_apply(action.actor, &d, &mut apply_status);
                     }
                     combat_log.push(format!("{} drinks {}!", actor_name, display_name), turn);
                 }
