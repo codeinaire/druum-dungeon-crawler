@@ -133,24 +133,45 @@
         ],
     ],
     features: [
-        // Row y=0: no features
+        // Row y=0: top wall row, unreachable — encounter_rate ignored
         [(), (), (), (), (), ()],
-        // Row y=1: no features
-        [(), (), (), (), (), ()],
+        // Row y=1: walkable — base 5% rate (#16 smoke test target)
+        [
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+        ],
         // Row y=2: spinner at (2,2)
-        [(), (), (spinner: true), (), (), ()],
-        // Row y=3: no features (dark_zone is at y=4 not y=3 per layout)
-        [(), (), (), (), (), ()],
+        [
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (spinner: true, encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+        ],
+        // Row y=3: walkable interior
+        [
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+        ],
         // Row y=4: dark_zone at (1,4), anti_magic_zone at (2,4), trap at (4,4), teleporter at (5,4)
         [
-            (),
-            (dark_zone: true),
-            (anti_magic_zone: true),
-            (),
-            (trap: Some(Pit(damage: 5, target_floor: Some(2)))),
-            (teleporter: Some((floor: 2, x: 1, y: 1, facing: Some(South)))),
+            (encounter_rate: 0.05),
+            (dark_zone: true, encounter_rate: 0.05),
+            (anti_magic_zone: true, encounter_rate: 0.05),
+            (encounter_rate: 0.05),
+            (trap: Some(Pit(damage: 5, target_floor: Some(2))), encounter_rate: 0.05),
+            (teleporter: Some((floor: 2, x: 1, y: 1, facing: Some(South))), encounter_rate: 0.05),
         ],
-        // Row y=5: no features
+        // Row y=5: bottom wall row, unreachable
         [(), (), (), (), (), ()],
     ],
     entry_point: (1, 1, North),
