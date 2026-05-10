@@ -9,6 +9,15 @@ Feature #15 shipped `CurrentEncounter`, `EnemyBundle`, `CombatRng`, and the `sta
 Plan: `project/plans/20260508-200000-feature-16-encounter-system-and-random-battles.md`
 Implementation summary + recovery deviations: `project/implemented/20260508-235900-feature-16-recovery-verify-and-commit.md`
 
+## Updates after first review
+
+Three follow-up commits (`3216011`, `0e846ac`) addressed first-pass review findings and a playtest bug:
+
+- **`3216011 test(combat): address review MEDIUM findings`** — wired `DungeonAssets` into `rate_zero_cell_no_encounter_rolls` and `foe_proximity_suppresses_rolls` (they previously passed via the asset-missing early-return, not the real guards), and added 4 new tests: `handle_encounter_request_sole_writer` (grep guard), `no_current_encounter_after_combat_exit` (`OnExit(Combat)` cleanup), `encounter_rate_clamp` (cell-rate trust-boundary clamp), `max_enemies_per_encounter_truncation` (8-enemy cap).
+- **`0e846ac fix(content): author encounter_rate on floor_01 walkable cells`** — playtest surfaced 54 steps with zero encounters. Root cause: `CellFeatures::encounter_rate` defaults to `0.0` and `floor_01.dungeon.ron` never authored a value on any cell, so the probability formula evaluated to 0.0 every step. Authored `encounter_rate: 0.05` on the 24 walkable cells (rows y=1..=4) per the smoke-test target. Added `floor_01_has_authored_encounter_rates` regression guard that loads the production asset and asserts >= 4 cells have non-zero rates.
+
+Test count: 205 default / 209 dev (original) → **210 default / 214 dev** (post-fixes). Floor 2 has the same data gap; left for a follow-on once #17 makes it reachable in playtest.
+
 ## How it works
 
 `check_random_encounter` reads `MovedEvent`, computes the soft-pity-scaled probability (`cell.encounter_rate * (1.0 + steps_since_last as f32 * 0.05).min(2.0)`), and on a roll hit writes `EncounterRequested { source: Random }` to the shared message channel. `handle_encounter_request` is the SOLE consumer: it picks an `EnemyGroup` via `WeightedIndex` from the floor's `EncounterTable`, spawns `EnemyBundle`s, inserts `CurrentEncounter`, and pushes `GameState::Combat`. Alarm traps from #13 write to the same channel — one consumer seam, two producers. `snap_movement_animation_on_combat_entry` fires on `OnEnter(Combat)` to kill any in-flight movement tween.
@@ -134,7 +143,7 @@ What to look for:
 - [ ] **`SfxKind::EncounterSting` plays on encounter** — audible sting before combat overlay appears
 - [ ] **Combat returns to the same dungeon cell with correct facing** — no position or orientation drift on combat exit
 - [ ] **No mid-stride tween visible on combat entry** — `snap_movement_animation_on_combat_entry` fires instantly (polish deferred to #25, but the snap must not leave the party visually mid-tile)
-- [ ] **Spawned enemy group matches floor_01 table** — enemies are Slimes, Goblins, Kobolds, or Bat Swarms (the four authored groups); no stray dev-stub "Goblin 1"/"Goblin 2" pair from the deleted `spawn_dev_encounter`
+- [ ] **Spawned enemy group matches floor_01 table** — enemies are Single Goblin, Pair of Goblins, Goblin Captain, or Cave Spider (the four authored groups); no stray dev-stub "Goblin 1"/"Goblin 2" pair from the deleted `spawn_dev_encounter`
 - [ ] **F7 forces an encounter immediately** (dev only) — press F7 from Dungeon state; combat should start within one frame with the selected group; accumulator resets on return
 
 To exercise the alarm-trap path (same consumer): stand on a trapped cell and confirm the encounter fires via `EncounterSource::AlarmTrap` — log entry should read "Alarm trap triggered" rather than "Random encounter".
