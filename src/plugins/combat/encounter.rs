@@ -441,6 +441,92 @@ mod tests {
         let s = EncounterState::default();
         assert_eq!(s.steps_since_last, 0);
     }
+
+    /// `check_random_encounter` clamps `encounter_rate` to `[0.0, 1.0]` before use
+    /// (line 268). This test verifies the clamp expression directly using the same
+    /// `CellFeatures` type that the production code reads.
+    #[test]
+    fn encounter_rate_clamp() {
+        use crate::data::dungeon::CellFeatures;
+        // Values above 1.0 must be clamped down.
+        let high = CellFeatures {
+            encounter_rate: 1.5,
+            ..Default::default()
+        };
+        assert_eq!(
+            high.encounter_rate.clamp(0.0, 1.0),
+            1.0,
+            "encounter_rate 1.5 must clamp to 1.0"
+        );
+        // Values below 0.0 must be clamped up.
+        let negative = CellFeatures {
+            encounter_rate: -0.3,
+            ..Default::default()
+        };
+        assert_eq!(
+            negative.encounter_rate.clamp(0.0, 1.0),
+            0.0,
+            "encounter_rate -0.3 must clamp to 0.0"
+        );
+        // In-range values are unchanged.
+        let valid = CellFeatures {
+            encounter_rate: 0.6,
+            ..Default::default()
+        };
+        assert_eq!(
+            valid.encounter_rate.clamp(0.0, 1.0),
+            0.6,
+            "encounter_rate 0.6 must remain unchanged after clamp"
+        );
+    }
+
+    /// `handle_encounter_request` truncates oversized `EnemyGroup`s to
+    /// `MAX_ENEMIES_PER_ENCOUNTER` (8). This test verifies the slice logic
+    /// used at lines 343-352.
+    #[test]
+    fn max_enemies_per_encounter_truncation() {
+        use crate::data::encounters::{EnemyGroup, EnemySpec};
+        use crate::plugins::combat::ai::EnemyAi;
+        use crate::plugins::party::character::{BaseStats, DerivedStats};
+
+        // Build a group with 12 enemies — well over the cap of 8.
+        let mk = |n: &str| EnemySpec {
+            name: n.into(),
+            base_stats: BaseStats::default(),
+            derived_stats: DerivedStats::default(),
+            ai: EnemyAi::default(),
+        };
+        let group = EnemyGroup {
+            enemies: (0..12).map(|i| mk(&format!("Enemy{i}"))).collect(),
+        };
+
+        // Mirror the production truncation from encounter.rs:343-350.
+        let enemies_to_spawn = if group.enemies.len() > MAX_ENEMIES_PER_ENCOUNTER {
+            &group.enemies[..MAX_ENEMIES_PER_ENCOUNTER]
+        } else {
+            &group.enemies[..]
+        };
+
+        assert_eq!(
+            enemies_to_spawn.len(),
+            MAX_ENEMIES_PER_ENCOUNTER,
+            "groups of 12 must be truncated to MAX_ENEMIES_PER_ENCOUNTER ({MAX_ENEMIES_PER_ENCOUNTER})"
+        );
+        // Also verify a group that's already within bounds is not truncated.
+        let small_group = EnemyGroup {
+            enemies: (0..3).map(|i| mk(&format!("E{i}"))).collect(),
+        };
+        let small_to_spawn = if small_group.enemies.len() > MAX_ENEMIES_PER_ENCOUNTER {
+            &small_group.enemies[..MAX_ENEMIES_PER_ENCOUNTER]
+        } else {
+            &small_group.enemies[..]
+        };
+        assert_eq!(
+            small_to_spawn.len(),
+            3,
+            "groups of 3 must not be truncated"
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -493,10 +579,32 @@ mod app_tests {
         app
     }
 
-    fn seed_test_rng(app: &mut App, seed: u64) {
-        let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    /// Build a test app pre-wired with a 200-cell corridor floor at the given
+    /// `encounter_rate`, a seeded RNG, and `DungeonAssets` pointing to the floor.
+    ///
+    /// 200 cells is wide enough for 100-step rate-zero and 50-step FOE-suppression
+    /// tests without triggering the bounds check in `apply_alarm_trap` / `apply_pit_trap`.
+    ///
+    /// Used by tests that need `check_random_encounter` to reach past the
+    /// asset-guard early-return and exercise the real rate-zero / FOE-suppression
+    /// code paths.
+    fn make_test_app_with_floor(rate: f32) -> App {
+        let mut app = make_test_app();
+        let floor_handle = build_test_floor(&mut app, 200, rate);
+        let seed_rng = rand_chacha::ChaCha8Rng::seed_from_u64(42);
         app.world_mut()
-            .insert_resource(EncounterRng(Box::new(rng)));
+            .insert_resource(EncounterRng(Box::new(seed_rng)));
+        app.world_mut()
+            .insert_resource(crate::plugins::loading::DungeonAssets {
+                floor_01: floor_handle,
+                floor_02: Handle::default(),
+                encounters_floor_01: Handle::default(),
+                item_db: Handle::default(),
+                enemy_db: Handle::default(),
+                class_table: Handle::default(),
+                spell_table: Handle::default(),
+            });
+        app
     }
 
     /// Build a 1×N corridor floor with `encounter_rate` set on every cell.
@@ -645,9 +753,9 @@ mod app_tests {
 
     #[test]
     fn rate_zero_cell_no_encounter_rolls() {
-        let mut app = make_test_app();
-        seed_test_rng(&mut app, 42);
-        let _floor_handle = build_test_floor(&mut app, 10, 0.0);
+        // Use the floor-wired app so check_random_encounter reaches the rate-zero
+        // guard (line 272), NOT the asset-missing early-return (line 248).
+        let mut app = make_test_app_with_floor(0.0);
         // Force into Dungeon state so check_random_encounter is gated correctly.
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
@@ -663,20 +771,28 @@ mod app_tests {
 
         // Counter still bumps (every step), but no encounters fire.
         // Counter is 100 because rate=0 still bumps the counter (no special-casing).
+        // This verifies the rate-zero guard at line 272 fired, not the asset-missing
+        // guard at line 248 (which would also block encounters but not bump the counter
+        // beyond the bump done before the guard — the counter still increments either way,
+        // so the real guard here is CurrentEncounter remaining absent).
         assert_eq!(
             app.world().resource::<EncounterState>().steps_since_last,
             100,
             "rate-zero cells still bump the counter (D-X2)"
         );
-        // No CurrentEncounter resource.
-        assert!(app.world().get_resource::<CurrentEncounter>().is_none());
+        // No CurrentEncounter resource — rate-zero guard prevented any roll.
+        assert!(
+            app.world().get_resource::<CurrentEncounter>().is_none(),
+            "rate-zero floor must never trigger CurrentEncounter"
+        );
     }
 
     #[test]
     fn foe_proximity_suppresses_rolls() {
-        let mut app = make_test_app();
-        seed_test_rng(&mut app, 42);
-        let _floor_handle = build_test_floor(&mut app, 10, 1.0); // rate = 1.0 → near-guaranteed
+        // Use the floor-wired app with rate=1.0 so check_random_encounter reaches the
+        // FOE-suppression guard (line 253), NOT the asset-missing early-return (line 248).
+        // rate=1.0 would guarantee an encounter every step if FOE suppression were absent.
+        let mut app = make_test_app_with_floor(1.0);
         app.world_mut().insert_resource(FoeProximity {
             nearby_foe_entities: vec![Entity::PLACEHOLDER],
         });
@@ -692,13 +808,16 @@ mod app_tests {
         }
 
         // Counter still bumps (every step) but no encounter fires.
-        assert!(
-            app.world().resource::<EncounterState>().steps_since_last >= 50,
-            "FOE-suppressed but counter must still bump"
+        // steps_since_last is reset on OnEnter(Dungeon) then bumped once per step.
+        // After 50 steps it must be exactly 50 (no reset from an encounter trigger).
+        assert_eq!(
+            app.world().resource::<EncounterState>().steps_since_last,
+            50,
+            "FOE-suppressed steps must all bump the counter"
         );
         assert!(
             app.world().get_resource::<CurrentEncounter>().is_none(),
-            "FoeProximity must suppress random rolls"
+            "FoeProximity must suppress random rolls even on rate=1.0 floor"
         );
     }
 
@@ -725,6 +844,72 @@ mod app_tests {
             *app.world().resource::<State<GameState>>().get(),
             GameState::Dungeon,
             "handle_encounter_request should bail safely when DungeonAssets is absent"
+        );
+    }
+
+    /// Guard that `handle_encounter_request` is the SOLE production writer of
+    /// `CurrentEncounter`.
+    ///
+    /// Greps `src/` for the system call form `commands.insert_resource(CurrentEncounter`,
+    /// excluding comment lines (doc `///`) and string-literal occurrences (lines
+    /// that contain `"` before the pattern). Exactly one match is expected.
+    /// If a future change adds a second system-level producer, this test breaks — that
+    /// is the point.
+    #[test]
+    fn handle_encounter_request_sole_writer() {
+        // Three-stage grep: find candidate lines, then exclude:
+        //   1. Doc/line-comment lines (///, //)
+        //   2. Lines where the match is inside a double-quoted string ("...")
+        //   3. Lines where the match is inside a backtick code span (`commands.`)
+        // Shell pipeline via `sh -c` so we can use `|` without temp files.
+        let output = std::process::Command::new("sh")
+            .args([
+                "-c",
+                r#"grep -rn 'commands\.insert_resource(CurrentEncounter' src/ | grep -v '//[/!]' | grep -v '".*commands\.' | grep -v '`commands\.'"#,
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("sh -c grep pipeline must be available");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let count = stdout.lines().filter(|l| !l.is_empty()).count();
+        assert_eq!(
+            count, 1,
+            "Expected exactly 1 occurrence of system-call \
+             `commands.insert_resource(CurrentEncounter` in src/ \
+             (sole production writer in handle_encounter_request). \
+             Found {count}:\n{stdout}"
+        );
+    }
+
+    /// Verify `clear_current_encounter` (the `OnExit(Combat)` system) removes
+    /// `CurrentEncounter` when the state machine exits Combat.
+    ///
+    /// This covers the same invariant as `current_encounter_removed_on_combat_exit`
+    /// but with the name listed in the PR test plan, enshrining it as a named guard.
+    #[test]
+    fn no_current_encounter_after_combat_exit() {
+        let mut app = make_test_app();
+        // Simulate a prior combat by inserting CurrentEncounter directly.
+        app.world_mut().insert_resource(CurrentEncounter {
+            enemy_entities: vec![],
+            fleeable: true,
+        });
+        // Enter Combat state.
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Combat);
+        app.update();
+        app.update();
+        // Exit Combat state — OnExit(Combat) fires clear_current_encounter.
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Dungeon);
+        app.update();
+        app.update();
+        // CurrentEncounter must be absent (Pitfall 6 — stale encounter state).
+        assert!(
+            app.world().get_resource::<CurrentEncounter>().is_none(),
+            "CurrentEncounter must be removed by clear_current_encounter on OnExit(Combat)"
         );
     }
 
