@@ -67,6 +67,15 @@ Files patched beyond plan's carve-out list:
 
 5. **D-I7 (Recovery session) — features.rs committed as atomic unit.** The plan's 5-commit cadence treats `features.rs` as Commit 1 (Random variant) and separately as Commit 3 (DungeonAssets cascade fix). In the recovery scenario all code existed on disk simultaneously; GitButler's `but rub` cannot split a single file at hunk level. Both edits to `features.rs` go into Commit 1. Similarly, `turn_manager.rs` contains both the Step 6 deletion (Commit 4) and the EncounterPlugin cascade fix (plan's Commit 5); both go into Commit 4.
 
+6. **D-I8 (Recovery session) — all code in one commit.** D-I7's note was prescient but incomplete: GitButler's `but commit` consumed all unassigned changes (all files) into a single commit since only one branch was applied. The 5-commit cadence collapsed to 1 code commit (SHA 19e87a3) + 1 docs commit.
+
+7. **D-I9 (Recovery session) — additional cascade fixes not in original plan.** Five more compile/test failures found during cargo gate runs:
+   - `src/plugins/ui/minimap.rs` — `DungeonAssets` struct literal missing `encounters_floor_01`
+   - `turn_manager.rs` test app — missing `init_asset::<DungeonFloor>()`, `init_resource::<ActiveFloorNumber>()`, `add_message::<SfxRequest>()`
+   - `encounter.rs` test app — missing `add_message::<SfxRequest>()`, `init_resource::<ActionState<DungeonAction>>()`
+
+8. **D-I10 (Recovery session) — `build_test_encounter_table` dead code removed.** The function was present in `encounter.rs` test module but never called (plan D-I5 simplified the test it was written for). Removed it and its now-unused `EnemyAi` import to pass clippy `-D warnings`.
+
 ---
 
 ## Steps Skipped
@@ -77,42 +86,42 @@ None skipped. Step 14 (manual smoke test) is deferred — it requires an interac
 
 ## Verification Results
 
-### Code review (recovery session — no shell access in implementer agent)
+### Recovery session (shell access restored — 2026-05-10)
 
-All 12 files verified by reading. Key correctness items confirmed:
-- `EncounterSource::Random` appended without touching `AlarmTrap` arm or `apply_alarm_trap`
-- `pick_group` uses `?Sized` bound, `rand::distr::weighted::WeightedIndex` (not deprecated path), `rng.random::<f32>()` (not `.gen()`)
-- `handle_encounter_request` is SOLE `insert_resource(CurrentEncounter` in production code
-- `clear_current_encounter` runs `OnExit(Combat)` 
-- Counter bump precedes all `continue` guards in `check_random_encounter` loop
-- `force_encounter_on_f7` uses `Res<ButtonInput<KeyCode>>` directly, not leafwing
-- All cascade fixes include `encounters_floor_01: Handle::default()` in struct literals and `init_asset::<EncounterTable>()` in test apps
-- `iter_current_update_messages()` API matches the existing pattern at `features.rs:934-936`
-- `write_moved_event` in tests uses `.resource_mut::<Messages<MovedEvent>>().write(...)` matching `features.rs:828-834` pattern
+**Bugs fixed before gates passed:**
 
-### Commands to run (user must execute)
+1. `EnemyAi` missing `Serialize, Deserialize` — added derives + `use serde::{Deserialize, Serialize}` to `src/plugins/combat/ai.rs`.
+2. `rand::Rng` not in scope at `encounter.rs:281` — added `use rand::Rng;` to `src/plugins/combat/encounter.rs`.
+3. `DungeonAssets` struct literal in `minimap.rs` missing `encounters_floor_01` — added `encounters_floor_01: Handle::default()` to `src/plugins/ui/minimap.rs`.
+4. `turn_manager` test app missing `init_asset::<DungeonFloor>()` — `check_random_encounter` needs it when combat transitions back to Dungeon.
+5. `turn_manager` test app missing `init_resource::<ActiveFloorNumber>()` — same reason as above.
+6. `turn_manager` test app missing `add_message::<SfxRequest>()` — `handle_encounter_request` writes it.
+7. `encounter` test app missing `add_message::<SfxRequest>()` — `CellFeaturesPlugin` systems write it.
+8. `encounter` test app missing `init_resource::<ActionState<DungeonAction>>()` — `CellFeaturesPlugin::handle_door_interact` reads it.
+9. `build_test_encounter_table` function in `encounter.rs` test module was dead code (never called) — removed it and its now-unused `EnemyAi` import to pass clippy `-D warnings`.
 
-```zsh
-cd /Users/nousunio/Repos/Learnings/claude-code/druum
-zsh /tmp/feature16-verify-and-commit.sh
+**Gate results:**
+
 ```
-
-The script at `/tmp/feature16-verify-and-commit.sh` runs the full gate and then commits all 6 commits.
+cargo check                                    → Finished (0 errors)
+cargo check --features dev                     → Finished (0 errors)
+cargo test                                     → 205 passed; 0 failed
+cargo test --features dev                      → 209 passed; 0 failed
+cargo clippy --all-targets -- -D warnings      → Finished (0 errors)
+cargo clippy --all-targets --features dev -- -D warnings → Finished (0 errors)
+```
 
 ---
 
-## Pending: Commit Table
+## Commit Table
 
-To be filled after user runs the commit script. Expected format:
+Note: D-I7 extended — all code landed in a single commit because all files were unassigned
+when `but commit` ran (GitButler stages all unassigned changes when only one branch is applied).
 
 | # | SHA | Title |
 |---|-----|-------|
-| 1 | TBD | feat(combat): add EncounterSource::Random variant for #16 |
-| 2 | TBD | feat(data): EncounterTable schema, RON asset, data module wiring |
-| 3 | TBD | feat(loading): EncounterTable loader, DungeonAssets handle, cascade fixes |
-| 4 | TBD | refactor(combat): delete spawn_dev_encounter dev stub |
-| 5 | TBD | feat(combat): EncounterPlugin — random rolls, soft-pity, combat entry |
-| 6 | TBD | docs(plan): mark feature-16 plan complete, update implementation summary |
+| 1 (all code) | 19e87a3 | feat(combat): add EncounterSource::Random variant for #16 |
+| 2 (docs) | TBD | docs(plan): mark feature-16 complete, fill verification results |
 
 ---
 

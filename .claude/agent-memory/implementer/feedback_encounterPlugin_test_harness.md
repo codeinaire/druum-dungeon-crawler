@@ -1,14 +1,27 @@
 ---
 name: EncounterPlugin test harness requirements post-#16
-description: Any test app with CombatPlugin (which includes EncounterPlugin) needs init_asset EncounterTable plus add_message EncounterRequested when CellFeaturesPlugin is absent
+description: CombatPlugin test apps need init_asset EncounterTable/DungeonFloor, init_resource ActiveFloorNumber, add_message EncounterRequested/SfxRequest; CellFeaturesPlugin test apps also need ActionState<DungeonAction>
 type: feedback
 ---
 
-When `CombatPlugin` is included in a test app after Feature #16, `EncounterPlugin` is automatically included as a sub-plugin. This requires two additional initializations in test harnesses that don't include `CellFeaturesPlugin`:
+After Feature #16, `EncounterPlugin` is a sub-plugin of `CombatPlugin`. Test harnesses must explicitly initialize everything EncounterPlugin and CellFeaturesPlugin need.
 
-1. `app.init_asset::<crate::data::EncounterTable>();` — `handle_encounter_request` takes `Res<Assets<EncounterTable>>`
-2. `app.add_message::<crate::plugins::dungeon::features::EncounterRequested>();` — `EncounterPlugin` reads/writes this message, which is normally registered by `CellFeaturesPlugin`
+**Test apps with CombatPlugin but WITHOUT CellFeaturesPlugin** (e.g., turn_manager, ui_combat):
 
-**Why:** `EncounterPlugin` is registered inside `CombatPlugin::build` as a sub-plugin, so it's invisible at the call site. Any test that includes `CombatPlugin` without `CellFeaturesPlugin` must explicitly initialize both.
+1. `app.init_asset::<crate::data::EncounterTable>();` — `handle_encounter_request` reads it
+2. `app.init_asset::<crate::data::DungeonFloor>();` — `check_random_encounter` reads it (runs when combat exits back to Dungeon)
+3. `app.init_resource::<crate::plugins::dungeon::ActiveFloorNumber>();` — `check_random_encounter` reads it
+4. `app.add_message::<crate::plugins::dungeon::features::EncounterRequested>();` — normally by CellFeaturesPlugin
+5. `app.add_message::<crate::plugins::audio::SfxRequest>();` — `handle_encounter_request` writes it; normally by AudioPlugin
 
-**How to apply:** When writing new test apps (or adding `CombatPlugin` to an existing test harness), always add both lines unless `CellFeaturesPlugin` is already in the plugin list. Affected harnesses as of #16: `turn_manager.rs::app_tests::make_test_app`, `ui_combat.rs::app_tests::make_test_app`. Harnesses that include `CellFeaturesPlugin` do NOT need the second line (e.g., `encounter.rs::app_tests::make_test_app`).
+**Test apps with CombatPlugin AND CellFeaturesPlugin** (e.g., encounter.rs tests, features.rs tests):
+
+All 5 above still apply, PLUS:
+6. `app.add_message::<crate::plugins::audio::SfxRequest>();` — CellFeaturesPlugin systems (apply_poison_trap, apply_alarm_trap, etc.) write SfxRequest; AudioPlugin normally registers it
+7. `app.init_resource::<leafwing_input_manager::prelude::ActionState<crate::plugins::input::DungeonAction>>();` — `handle_door_interact` (CellFeaturesPlugin) reads it; insert WITHOUT InputManagerPlugin to avoid mouse panic
+
+**DungeonAssets cascade:** When DungeonAssets gains a new field (like encounters_floor_01), ALL struct literal sites must be updated — including non-combat/dungeon test files like `minimap.rs`.
+
+**Why:** EncounterPlugin is invisible at the call site; cascading system param failures only show up at runtime during cargo test.
+
+**How to apply:** Run `grep -rn "DungeonAssets {" src/ tests/` when DungeonAssets struct changes; audit all make_test_app functions for the full resource list above.
