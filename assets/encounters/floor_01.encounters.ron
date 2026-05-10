@@ -1,0 +1,92 @@
+// Encounter table for floor 1. Weights are u32; sum to 100 for designer
+// ergonomics. WeightedIndex normalises automatically.
+//
+// Inline EnemySpec until #17 ships EnemyDb (D-A4).
+
+(
+    id: "b1f_encounters",
+    entries: [
+        // Common: Single Goblin (50%)
+        (
+            weight: 50,
+            group: (
+                enemies: [
+                    (
+                        name: "Goblin",
+                        base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
+                        derived_stats: (
+                            max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
+                            attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
+                            speed: 6, accuracy: 60, evasion: 5,
+                        ),
+                        ai: RandomAttack,
+                    ),
+                ],
+            ),
+        ),
+        // Uncommon: Pair of Goblins (30%)
+        (
+            weight: 30,
+            group: (
+                enemies: [
+                    (
+                        name: "Goblin",
+                        base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
+                        derived_stats: (
+                            max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
+                            attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
+                            speed: 6, accuracy: 60, evasion: 5,
+                        ),
+                        ai: RandomAttack,
+                    ),
+                    (
+                        name: "Goblin",
+                        base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
+                        derived_stats: (
+                            max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
+                            attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
+                            speed: 6, accuracy: 60, evasion: 5,
+                        ),
+                        ai: RandomAttack,
+                    ),
+                ],
+            ),
+        ),
+        // Rare: Goblin Captain (15%) — Boss-AI variant for #15 BossFocusWeakest hook
+        (
+            weight: 15,
+            group: (
+                enemies: [
+                    (
+                        name: "Goblin Captain",
+                        base_stats: (strength: 12, intelligence: 4, piety: 4, vitality: 12, agility: 6, luck: 4),
+                        derived_stats: (
+                            max_hp: 60, current_hp: 60, max_mp: 0, current_mp: 0,
+                            attack: 12, defense: 8, magic_attack: 0, magic_defense: 2,
+                            speed: 6, accuracy: 70, evasion: 5,
+                        ),
+                        ai: BossFocusWeakest,
+                    ),
+                ],
+            ),
+        ),
+        // Very rare: Cave Spider (5%) — fast, low-HP
+        (
+            weight: 5,
+            group: (
+                enemies: [
+                    (
+                        name: "Cave Spider",
+                        base_stats: (strength: 6, intelligence: 2, piety: 2, vitality: 4, agility: 12, luck: 6),
+                        derived_stats: (
+                            max_hp: 18, current_hp: 18, max_mp: 0, current_mp: 0,
+                            attack: 10, defense: 3, magic_attack: 0, magic_defense: 1,
+                            speed: 12, accuracy: 75, evasion: 15,
+                        ),
+                        ai: RandomAttack,
+                    ),
+                ],
+            ),
+        ),
+    ],
+)

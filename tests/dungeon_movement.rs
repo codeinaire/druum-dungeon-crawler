@@ -74,6 +74,9 @@ fn party_spawns_at_entry_point_on_enter_dungeon() {
     // requires Assets<ItemDb>. Register it explicitly since LoadingPlugin is absent.
     app.init_asset::<ItemDb>();
 
+    // EncounterPlugin (inside CombatPlugin) needs Assets<EncounterTable>. Feature #16.
+    app.init_asset::<druum::data::EncounterTable>();
+
     // handle_dungeon_input writes SfxRequest messages. AudioPlugin registers
     // this in production; in headless tests we register it directly.
     app.add_message::<SfxRequest>();
@@ -135,6 +138,7 @@ fn setup_dungeon_assets_and_enter(
     commands.insert_resource(DungeonAssets {
         floor_01: floor_assets.floor.clone(),
         floor_02: Handle::default(),
+        encounters_floor_01: Handle::default(), // Feature #16
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),

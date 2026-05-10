@@ -130,7 +130,9 @@ pub struct EncounterRequested {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EncounterSource {
     AlarmTrap,
-    // Future: Random (foe roll), Foe (overworld encounter) — surface in #16.
+    /// Random roll triggered by `check_random_encounter` per `MovedEvent`.
+    Random,
+    // Future: Foe (overworld encounter) — surface in #22.
 }
 
 // ---------------------------------------------------------------------------
@@ -769,6 +771,8 @@ mod app_tests {
         app.init_asset::<DungeonFloor>();
         // ItemDb needed by PartyPlugin's populate_item_handle_registry (runs on OnExit(Loading)).
         app.init_asset::<crate::data::ItemDb>();
+        // EncounterTable needed by EncounterPlugin (inside CombatPlugin) for handle_encounter_request.
+        app.init_asset::<crate::data::EncounterTable>(); // Feature #16
         // Mesh + StandardMaterial needed by DungeonPlugin's spawn_dungeon_geometry.
         app.init_asset::<bevy::prelude::Mesh>();
         app.init_asset::<bevy::pbr::StandardMaterial>();
@@ -810,6 +814,7 @@ mod app_tests {
         app.world_mut().insert_resource(DungeonAssets {
             floor_01: handle.clone(),
             floor_02: Handle::default(),
+            encounters_floor_01: Handle::default(), // Feature #16
             item_db: Handle::default(),
             enemy_db: Handle::default(),
             class_table: Handle::default(),

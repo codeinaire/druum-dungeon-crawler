@@ -10,6 +10,7 @@
 pub mod classes;
 pub mod dungeon;
 pub mod enemies;
+pub mod encounters;
 pub mod items;
 pub mod spells;
 
@@ -18,6 +19,7 @@ pub use dungeon::{
     CellFeatures, ColorRgb, Direction, DungeonFloor, FogConfig, LightingConfig, TeleportTarget,
     TrapType, WallMask, WallType,
 };
+pub use encounters::{EncounterEntry, EncounterTable, EnemyGroup, EnemySpec};
 pub use enemies::EnemyDb;
 pub use items::{ItemAsset, ItemDb, ItemStatBlock};
 pub use spells::SpellTable;

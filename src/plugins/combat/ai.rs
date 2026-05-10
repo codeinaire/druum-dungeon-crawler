@@ -23,6 +23,7 @@
 
 use bevy::prelude::*;
 use rand::seq::IteratorRandom;
+use serde::{Deserialize, Serialize};
 
 use crate::plugins::combat::actions::{CombatActionKind, QueuedAction, Side};
 use crate::plugins::combat::enemy::{Enemy, EnemyIndex};
@@ -42,7 +43,7 @@ use crate::plugins::state::CombatPhase;
 /// - `RandomAttack` — default; picks any alive party member.
 /// - `BossFocusWeakest` — picks alive party member with lowest current_hp.
 /// - `BossAttackDefendAttack` — cycles Attack/Defend/Attack based on `turn % 3`.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum EnemyAi {
     #[default]
     RandomAttack,

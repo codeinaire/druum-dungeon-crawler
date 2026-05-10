@@ -41,9 +41,9 @@
 //! }
 //! ```
 //!
-//! #15 reads via `Option<Res<CurrentEncounter>>` so it ships without #16.
-//! Test fixtures define their own resource directly. Dev-stub spawn
-//! (`#[cfg(feature = "dev")]`) bypasses `CurrentEncounter` entirely.
+//! Owned by `combat::encounter::EncounterPlugin`. #15 reads via
+//! `Option<Res<CurrentEncounter>>` so combat tests that don't use #16's
+//! spawning path still work.
 
 use bevy::prelude::*;
 
@@ -178,11 +178,6 @@ impl Plugin for TurnManagerPlugin {
                 ),
             );
 
-        #[cfg(feature = "dev")]
-        app.add_systems(
-            OnEnter(GameState::Combat),
-            spawn_dev_encounter.after(init_combat_state),
-        );
     }
 }
 
@@ -665,57 +660,6 @@ fn dummy_combatant(name: &str) -> crate::plugins::combat::damage::Combatant {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dev-stub encounter spawner (Decision 27)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Dev-only stub: spawns 2 placeholder enemies on `OnEnter(GameState::Combat)`
-/// so manual smoke testing has fodder. Idempotence guard: if any `Enemy`
-/// exists, return early (mirrors `spawn_default_debug_party` at
-/// `party/mod.rs:88-126`). #16 deletes this stub when it ships its own
-/// encounter spawner.
-#[cfg(feature = "dev")]
-fn spawn_dev_encounter(mut commands: Commands, existing: Query<(), With<Enemy>>) {
-    if !existing.is_empty() {
-        return;
-    }
-    use crate::plugins::combat::ai::EnemyAi;
-    use crate::plugins::combat::enemy::{EnemyBundle, EnemyIndex, EnemyName};
-    use crate::plugins::party::character::BaseStats;
-    let stats = BaseStats {
-        strength: 8,
-        intelligence: 4,
-        piety: 4,
-        vitality: 8,
-        agility: 6,
-        luck: 4,
-    };
-    let derived = DerivedStats {
-        max_hp: 30,
-        current_hp: 30,
-        max_mp: 0,
-        current_mp: 0,
-        attack: 8,
-        defense: 5,
-        magic_attack: 0,
-        magic_defense: 2,
-        speed: 6,
-        accuracy: 60,
-        evasion: 5,
-    };
-    for i in 0..2u32 {
-        commands.spawn(EnemyBundle {
-            name: EnemyName(format!("Goblin {}", i + 1)),
-            index: EnemyIndex(i),
-            base_stats: stats,
-            derived_stats: derived,
-            ai: EnemyAi::RandomAttack,
-            ..Default::default()
-        });
-    }
-    info!("Dev-stub: spawned 2 Goblin enemies");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -797,9 +741,21 @@ mod app_tests {
         ));
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
+        app.init_asset::<crate::data::DungeonFloor>(); // Feature #16 (check_random_encounter reads Assets<DungeonFloor>)
+        // ActiveFloorNumber required by check_random_encounter (EncounterPlugin) which
+        // runs in Dungeon state (victory transitions back to Dungeon). Feature #16.
+        app.init_resource::<crate::plugins::dungeon::ActiveFloorNumber>();
         // tick_on_dungeon_step reads MessageReader<MovedEvent>; register it so the
         // system does not panic under default features (DungeonPlugin not loaded here).
         app.add_message::<crate::plugins::dungeon::MovedEvent>();
+        // EncounterPlugin (inside CombatPlugin) reads/writes EncounterRequested.
+        // CellFeaturesPlugin normally registers this; explicit here since CellFeaturesPlugin
+        // is not included in this test app (Feature #16).
+        app.add_message::<crate::plugins::dungeon::features::EncounterRequested>();
+        // handle_encounter_request (EncounterPlugin) writes SfxRequest.
+        // AudioPlugin normally registers this; explicit here since AudioPlugin is absent.
+        app.add_message::<crate::plugins::audio::SfxRequest>();
         // ActionState<CombatAction> required by handle_combat_input (CombatUiPlugin).
         // Inserted directly (without ActionsPlugin) to avoid mouse-resource panic.
         app.init_resource::<

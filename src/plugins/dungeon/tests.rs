@@ -166,6 +166,7 @@ fn make_test_app() -> App {
     ));
     app.init_asset::<DungeonFloor>();
     app.init_asset::<crate::data::ItemDb>();
+    app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
     // Init mesh and material asset registries so spawn_test_scene's
     // ResMut<Assets<Mesh>> and ResMut<Assets<StandardMaterial>> parameters
     // are satisfied without the full PbrPlugin chain.
@@ -215,6 +216,7 @@ fn insert_test_floor(app: &mut App, floor: DungeonFloor) {
     app.world_mut().insert_resource(DungeonAssets {
         floor_01: handle,
         floor_02: Handle::default(),
+        encounters_floor_01: Handle::default(), // Feature #16
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),
