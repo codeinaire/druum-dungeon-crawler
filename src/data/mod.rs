@@ -6,6 +6,7 @@
 //! - `enemies` — `EnemyDb` (Feature #15)
 //! - `classes` — `ClassTable`, `ClassDef` (Feature #11)
 //! - `spells` — `SpellTable` (Feature #20)
+//! - `town` — `ShopStock`, `RecruitPool`, `TownServices` (Feature #18)
 
 pub mod classes;
 pub mod dungeon;
@@ -13,6 +14,7 @@ pub mod enemies;
 pub mod encounters;
 pub mod items;
 pub mod spells;
+pub mod town;
 
 pub use classes::{ClassDef, ClassTable};
 pub use dungeon::{
@@ -23,3 +25,4 @@ pub use encounters::{EncounterEntry, EncounterTable, EnemyGroup, EnemySpec};
 pub use enemies::EnemyDb;
 pub use items::{ItemAsset, ItemDb, ItemStatBlock};
 pub use spells::SpellTable;
+pub use town::{RecruitDef, RecruitPool, ShopEntry, ShopStock, TownServices};

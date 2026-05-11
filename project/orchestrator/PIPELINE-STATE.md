@@ -1,53 +1,61 @@
 # Pipeline State
 
-**Task:** Drive the full feature pipeline (research → plan → implement → review → ship) for **Feature #17: Enemy Billboard Sprite Rendering** in the Druum Bevy 0.18.1 first-person dungeon-crawler RPG. Use `bevy_sprite3d 8.0` (verified Bevy 0.18 compatible via context7 + crate registry — see plan revision). On combat entry, spawn enemy entities as billboards in 3D space arranged in a row in front of the camera. Sprites support idle / attack / damage / dying frames driven by an animation state machine. Later (#22) the same visual pipeline is reused for FOEs walking on the dungeon grid. Roadmap §17 at `project/roadmaps/20260429-01-bevy-dungeon-crawler-roadmap.md` around line 913. Feature #16 just shipped (PR #16 open with 3 MEDIUM / 2 LOW review findings unaddressed — non-blocking for #17).
+**Task:** Feature #18a — Town Hub & Services (SPLIT: Square + Shop + Inn this PR; Temple + Guild deferred to #18b). Bevy 0.18.1 first-person dungeon-crawler RPG. Implement `GameState::Town` with sub-states `Square`, `Shop`, `Inn`. Square = pure-egui menu (no 3D backdrop). Shop = buy/sell items against party-wide `Resource<Gold>` (u32, saturating), 50% sell-back ratio, stock bounded by floor progression. Inn = rest party (full HP/MP heal, advance in-game clock, charge gold). Adds `Resource<GameClock>` (~15 LOC: day + turn counters). Inventory cap = 8 per character (Wizardry convention). "Leave Town" → `GameState::TitleScreen`. Temple + Guild explicitly deferred to follow-up #18b. Difficulty 3/5, mostly UI (heavy egui). Depends on #2 (party), #11 (inventory), #12 (status effects). Branch: `feature/18a-town-square-shop-inn`. Research: `project/research/20260511-feature-18-town-hub-and-services.md`.
 
-**Status:** step-3-complete — pending ship (step 4)
-**Last Completed Step:** 3 (implement — all 6 quality gates green, committed 2026-05-11)
+**Status:** COMPLETE
+**Last Completed Step:** 6 (summary)
 
 ## Artifacts
 
 | Step | Description | Artifact                                 |
 | ---- | ----------- | ---------------------------------------- |
-| 1    | Research    | `project/research/20260511-feature-17-enemy-billboard-sprite-rendering.md` |
-| 2    | Plan        | `project/plans/20260511-120000-feature-17-enemy-billboard-sprite-rendering.md` (revised 2026-05-11) |
-| 3    | Implement   | `project/implemented/20260511-120001-feature-17-enemy-billboard-sprite-rendering.md` |
-| 4    | Ship        | pending — branch `feature/17-enemy-billboard-sprite-rendering`, commit `9ae9f7f` |
-| 5    | Code Review | pending                                  |
+| 1    | Research    | `project/research/20260511-feature-18-town-hub-and-services.md` |
+| 2    | Plan        | `project/plans/20260511-180000-feature-18a-town-square-shop-inn.md` (Status: Complete) |
+| 3    | Implement   | `project/implemented/20260511-190000-feature-18a-town-square-shop-inn.md` — all 6 quality gates GREEN (cargo check x2, cargo test x2 [260+6 / 264+6 pass], cargo clippy x2) |
+| 4    | Ship        | `project/shipper/feature-18a-pr-body.md`; PR https://github.com/codeinaire/druum-dungeon-crawler/pull/18 open on branch `feature/18a-town-square-shop-inn` (commit `3486971`) |
+| 5    | Code Review | `project/reviews/20260511-215220-feature-18a-town-square-shop-inn-pr-review.md` — Verdict APPROVE (1 MEDIUM, 1 LOW; non-blocking) |
+| 6    | Summary     | `project/orchestrator/20260511-215508-feature-18a-town-square-shop-inn.md` |
 
-## Commit SHAs (Step 3)
+## Key research findings
 
-- `9ae9f7f` — `feat(combat): add enemy billboard sprite rendering (#17)` — all 16 files, 411 insertions, 29 deletions, on branch `feature/17-enemy-billboard-sprite-rendering`
+- **Δ deps = 0** — `bevy_egui = 0.39.1` already present; verified on disk against `bevy = 0.18.1`.
+- **`TownLocation` SubStates already declared + registered** at `src/plugins/state/mod.rs:38-56` with all five variants. The roadmap text is stale on this.
+- **`ItemAsset.value: u32` already documented as "#18 shop price"** at `src/data/items.rs:101-103`. No item-schema change required.
+- **BGM crossfade for `GameState::Town` already wired** at `src/plugins/audio/bgm.rs:106-112`. `bgm_town` handle already loaded.
+- **`MenuAction` already documented as "Town reuses this enum in v1"** at `src/plugins/input/mod.rs:54-67`.
+- **`EquipmentChangedEvent` is the dual-use stat-changed trigger** — Temple revive/cure fires this to re-derive stats via existing recompute system (Temple is in #18b, but pattern noted).
+- Primary recommendation (full #18): single PR with all five screens at minimum-viable depth.
+- Scope decision: user chose **alternative split** — #18a = Square+Shop+Inn this PR; #18b = Temple+Guild follow-up.
 
 ## User Decisions
 
-User pre-resolved all four checkpoint decisions before pipeline kickoff:
-- **1C** — Solid-color placeholder textures only this PR. No real sprite art. Defer art sourcing to a follow-up.
-- **2B** — 10 enemies in `enemies.ron`. Front-load the roster for combat balance work in #21.
-- **3A** — Single-facing sprites for #17. Revisit 4-directional at #22.
-- **4A** — Originally: ship the manual billboard fallback if `bevy_sprite3d 7.x` didn't support Bevy 0.18.1. **Superseded 2026-05-11:** user issued revision instruction to use `bevy_sprite3d 8.0` after confirming the new major version supports Bevy 0.18. Planner verified via context7 + `cargo info` + reading the crate's source: `bevy_sprite3d 8.0` depends on `bevy 0.18.0`; the version table in the crate's README explicitly maps `bevy_sprite3d 8.0 ↔ bevy 0.18`; `cargo tree` confirms `bevy_sprite3d v8.0.0 → bevy v0.18.1`.
+| # | Decision | Resolved value |
+|---|----------|----------------|
+| 1 | PR scope | **ALTERNATIVE** — Split: #18a (Square + Shop + Inn) this PR; Temple + Guild deferred to #18b |
+| 2 | Gold model | Party-wide `Resource<Gold>` (u32, saturating) |
+| 3 | Town backdrop | None — pure egui ("the square is a menu, not a level") |
+| 4 | "Leave Town" destination | `GameState::TitleScreen` |
+| 5 | `GameClock` | Add now (~15 LOC: day + turn counters) |
+| 6 | Inventory cap | 8 per character (Wizardry convention) |
+| 7 | Sell-back ratio | 50% (`value / 2`) |
 
-**Implicit orchestrator decision (to satisfy 1C + 2B combination):** Each of the 10 placeholder enemies gets a **distinct solid color** — near-zero cost, gives visual variety for combat testing, confirms per-enemy material pipeline.
+## Quality Gate Verification (2026-05-11)
 
-## Quality Gate Results (Step 3)
+All six gates run from the top-level conversation, ALL GREEN:
 
-All 6 gates passed after recovery agent fixed 4 bugs in prior implementer's code:
+| Gate | Command | Result |
+|------|---------|--------|
+| 1 | `cargo check` | exit 0 |
+| 2 | `cargo check --features dev` | exit 0 |
+| 3 | `cargo test` | 260 lib + 6 integration tests pass |
+| 4 | `cargo test --features dev` | 264 lib + 6 integration tests pass |
+| 5 | `cargo clippy --all-targets -- -D warnings` | exit 0 |
+| 6 | `cargo clippy --all-targets --features dev -- -D warnings` | exit 0 |
 
-| Command | Exit | Notes |
-|---------|------|-------|
-| `cargo check` | 0 | clean |
-| `cargo check --features dev` | 0 | clean |
-| `cargo test` | 0 | 225 lib + 6 integration tests |
-| `cargo test --features dev` | 0 | 229 lib + 6 integration tests |
-| `cargo clippy --all-targets -- -D warnings` | 0 | clean |
-| `cargo clippy --all-targets --features dev -- -D warnings` | 0 | clean |
-
-Bugs fixed during Step 3 recovery:
-1. `core.enemies.ron` used `[r,g,b]` (RON sequence) instead of `(r,g,b)` (RON tuple) for `[f32;3]` — caused `ExpectedStructLike` parse error
-2. `bevy_sprite3d::bundle_builder` requires `Assets<Image>` + `Assets<TextureAtlasLayout>` in ALL test apps that use CombatPlugin — 9 harnesses updated
-3. E0716 in test code — `entity_mut().get_mut()` chain needed two named bindings
-4. `clippy::collapsible_if` in `on_enemy_visual_event` — let-chain collapse required in Rust 2024 edition
-
-## Next Step
-
-**Step 4 — Ship**: push branch `feature/17-enemy-billboard-sprite-rendering` and open PR via `gh pr create`. Branch is at commit `9ae9f7f`. No blockers.
+Six fix-ups applied during verification (documented in implementation summary):
+1. `src/plugins/town/shop.rs:542` — import path correction for `ItemKind`
+2. `src/plugins/town/mod.rs:247,264` — `.world_mut()` for mutable query access
+3. `src/plugins/town/mod.rs:166-168` — `InputManagerPlugin` removed from test app
+4. `src/plugins/town/inn.rs` `handle_inn_rest` — `#[allow(clippy::too_many_arguments)]`
+5. `src/plugins/town/shop.rs` `handle_shop_input` — `#[allow(clippy::too_many_arguments)]`
+6. `src/plugins/town/shop.rs:510` — `clippy::erasing_op` workaround

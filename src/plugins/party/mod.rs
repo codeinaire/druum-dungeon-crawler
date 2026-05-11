@@ -72,7 +72,13 @@ impl Plugin for PartyPlugin {
         // are guaranteed loaded by bevy_asset_loader's continue_to_state at
         // Dungeon entry. See #11 plan §Critical Decision 5.
         #[cfg(feature = "dev")]
-        app.add_systems(OnEnter(GameState::Dungeon), spawn_default_debug_party);
+        {
+            app.add_systems(OnEnter(GameState::Dungeon), spawn_default_debug_party);
+            // Town is reachable directly from TitleScreen (Feature #18a Leave Town
+            // path), so the party must also be spawned on Town entry. The function
+            // is idempotent — re-entry from Dungeon is a no-op.
+            app.add_systems(OnEnter(GameState::Town), spawn_default_debug_party);
+        }
     }
 }
 

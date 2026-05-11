@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, SpellTable};
+use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RecruitPool, ShopStock, SpellTable, TownServices};
 use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
@@ -87,6 +87,21 @@ pub struct AudioAssets {
     pub sfx_door_close: Handle<AudioSource>,
 }
 
+/// Town asset handles — shop catalogue, recruit pool, and service costs.
+///
+/// Loaded by `bevy_asset_loader` alongside `DungeonAssets` and `AudioAssets`.
+/// Both derives are required: `AssetCollection` for the loading-state machinery,
+/// `Resource` so `bevy_asset_loader` can `commands.insert_resource` the populated value.
+#[derive(AssetCollection, Resource)]
+pub struct TownAssets {
+    #[asset(path = "town/core.shop_stock.ron")]
+    pub shop_stock: Handle<ShopStock>,
+    #[asset(path = "town/core.recruit_pool.ron")]
+    pub recruit_pool: Handle<RecruitPool>,
+    #[asset(path = "town/core.town_services.ron")]
+    pub services: Handle<TownServices>,
+}
+
 /// Marker tag on every entity spawned by `spawn_loading_screen`.
 /// `despawn_loading_screen` queries this to clean up on `OnExit`.
 #[derive(Component)]
@@ -112,6 +127,9 @@ impl Plugin for LoadingPlugin {
                 RonAssetPlugin::<ClassTable>::new(&["classes.ron"]),
                 RonAssetPlugin::<SpellTable>::new(&["spells.ron"]),
                 RonAssetPlugin::<EncounterTable>::new(&["encounters.ron"]), // Feature #16
+                RonAssetPlugin::<ShopStock>::new(&["shop_stock.ron"]),      // Feature #18
+                RonAssetPlugin::<RecruitPool>::new(&["recruit_pool.ron"]),  // Feature #18
+                RonAssetPlugin::<TownServices>::new(&["town_services.ron"]), // Feature #18
             ))
             // (2) Drive GameState::Loading -> TitleScreen once all
             //     handles in DungeonAssets report LoadedWithDependencies.
@@ -121,7 +139,8 @@ impl Plugin for LoadingPlugin {
                 LoadingState::new(GameState::Loading)
                     .continue_to_state(GameState::TitleScreen)
                     .load_collection::<DungeonAssets>()
-                    .load_collection::<AudioAssets>(), // Feature #6 — sibling of DungeonAssets
+                    .load_collection::<AudioAssets>() // Feature #6 — sibling of DungeonAssets
+                    .load_collection::<TownAssets>(), // Feature #18 — shop, recruit pool, services
             )
             // (3) Loading-screen UI lifecycle. Camera2d + centered text
             //     are spawned on OnEnter(Loading) and despawned on

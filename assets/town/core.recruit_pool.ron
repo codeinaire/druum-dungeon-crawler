@@ -1,0 +1,76 @@
+// Feature #18a — Guild recruit pool (zero readers in #18a; Feature #18b consumes this).
+// Provides 5 recruits across Race/Class spread for the Guild screen.
+(
+    recruits: [
+        (
+            name: "Ser Edran",
+            race: Human,
+            class: Fighter,
+            base_stats: (
+                strength: 11,
+                intelligence: 5,
+                piety: 5,
+                vitality: 11,
+                agility: 9,
+                luck: 5,
+            ),
+            default_row: Front,
+        ),
+        (
+            name: "Lyris",
+            race: Elf,
+            class: Mage,
+            base_stats: (
+                strength: 5,
+                intelligence: 13,
+                piety: 8,
+                vitality: 7,
+                agility: 11,
+                luck: 7,
+            ),
+            default_row: Back,
+        ),
+        (
+            name: "Brother Talos",
+            race: Human,
+            class: Priest,
+            base_stats: (
+                strength: 7,
+                intelligence: 7,
+                piety: 13,
+                vitality: 9,
+                agility: 7,
+                luck: 7,
+            ),
+            default_row: Back,
+        ),
+        (
+            name: "Brak Ironfist",
+            race: Dwarf,
+            class: Fighter,
+            base_stats: (
+                strength: 13,
+                intelligence: 4,
+                piety: 4,
+                vitality: 14,
+                agility: 6,
+                luck: 5,
+            ),
+            default_row: Front,
+        ),
+        (
+            name: "Pip Nimblefoot",
+            race: Hobbit,
+            class: Fighter,
+            base_stats: (
+                strength: 8,
+                intelligence: 7,
+                piety: 6,
+                vitality: 9,
+                agility: 14,
+                luck: 12,
+            ),
+            default_row: Front,
+        ),
+    ],
+)

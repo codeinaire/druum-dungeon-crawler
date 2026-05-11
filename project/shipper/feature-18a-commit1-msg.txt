@@ -1,0 +1,12 @@
+feat(town): add Town Square, Shop, and Inn screens (#18a)
+
+Wires GameState::Town with three sub-states (Square, Shop, Inn) as a
+working pure-egui hub. Adds party-wide Resource<Gold> with try_spend/earn
+saturating helpers, Resource<GameClock> for day/turn tracking, TownAssets
+AssetCollection for three new RON files (shop_stock.ron, recruit_pool.ron,
+town_services.ron), and full TownPlugin replacing the 17-line stub.
+Temple + Guild are stub placeholder screens only — real service logic deferred
+to #18b. Inventory cap = 8 per character (Wizardry convention). 50% sell-back
+ratio. Leave Town returns to TitleScreen. Zero new Cargo dependencies.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
