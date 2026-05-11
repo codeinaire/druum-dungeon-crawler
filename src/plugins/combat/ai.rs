@@ -184,6 +184,12 @@ mod app_tests {
         ));
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
+        // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin; MinimalPlugins lacks PbrPlugin).
+        app.init_asset::<bevy::prelude::Mesh>();
+        app.init_asset::<bevy::pbr::StandardMaterial>();
+        app.init_asset::<bevy::image::Image>();
+        app.init_asset::<bevy::image::TextureAtlasLayout>();
         // tick_on_dungeon_step reads MessageReader<MovedEvent>; register it so the
         // system does not panic under default features (DungeonPlugin not loaded here).
         app.add_message::<crate::plugins::dungeon::MovedEvent>();

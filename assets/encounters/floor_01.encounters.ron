@@ -19,6 +19,7 @@
             group: (
                 enemies: [
                     (
+                        id: "goblin",
                         name: "Goblin",
                         base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
                         derived_stats: (
@@ -37,6 +38,7 @@
             group: (
                 enemies: [
                     (
+                        id: "goblin",
                         name: "Goblin",
                         base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
                         derived_stats: (
@@ -47,6 +49,7 @@
                         ai: RandomAttack,
                     ),
                     (
+                        id: "goblin",
                         name: "Goblin",
                         base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
                         derived_stats: (
@@ -65,6 +68,7 @@
             group: (
                 enemies: [
                     (
+                        id: "goblin_captain",
                         name: "Goblin Captain",
                         base_stats: (strength: 12, intelligence: 4, piety: 4, vitality: 12, agility: 6, luck: 4),
                         derived_stats: (
@@ -83,6 +87,7 @@
             group: (
                 enemies: [
                     (
+                        id: "cave_spider",
                         name: "Cave Spider",
                         base_stats: (strength: 6, intelligence: 2, piety: 2, vitality: 4, agility: 12, luck: 6),
                         derived_stats: (

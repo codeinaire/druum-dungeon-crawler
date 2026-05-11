@@ -1,3 +1,147 @@
-// Stub for Feature #3 — EnemyDb has no fields yet.
-// Features #11/#15 add the real enemy schema.
-()
+// Druum enemy roster — Feature #17.
+//
+// Each entry MUST have a unique `id` (referenced by `EnemySpec.id` in
+// encounter tables) and a `placeholder_color` in [0.0, 1.0] per channel.
+// Channels are clamped at the consumer (trust boundary, src/plugins/combat/enemy_render.rs).
+//
+// accuracy/evasion on derived_stats are 0-100 percentages (see DerivedStats doc).
+// Party derives land at acc≈73 / eva≈13 for level 1 (debug-party BaseStats);
+// authored enemy values stay in the same range — see floor_01.encounters.ron
+// header for cross-references.
+//
+// Hue assignments (user decision: one distinct color per enemy):
+//   Green        — Goblin             (fodder)
+//   Ochre        — Goblin Captain     (mini-boss)
+//   Dark Purple  — Cave Spider        (fast glass cannon)
+//   Red          — Hobgoblin          (heavy fodder)
+//   Orange       — Kobold             (fodder)
+//   Yellow       — Acid Slime         (low HP, future status)
+//   Blue         — Ice Imp            (fodder)
+//   Cyan         — Wraith             (high evasion)
+//   Magenta      — Cultist            (future magic-user, #20)
+//   White        — Skeleton Lord      (boss)
+
+(
+    enemies: [
+        (
+            id: "goblin",
+            display_name: "Goblin",
+            base_stats: (strength: 8, intelligence: 4, piety: 4, vitality: 8, agility: 6, luck: 4),
+            derived_stats: (
+                max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
+                attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
+                speed: 6, accuracy: 50, evasion: 3,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.4, 0.6, 0.3),
+        ),
+        (
+            id: "goblin_captain",
+            display_name: "Goblin Captain",
+            base_stats: (strength: 12, intelligence: 4, piety: 4, vitality: 12, agility: 6, luck: 4),
+            derived_stats: (
+                max_hp: 60, current_hp: 60, max_mp: 0, current_mp: 0,
+                attack: 12, defense: 8, magic_attack: 0, magic_defense: 2,
+                speed: 6, accuracy: 70, evasion: 5,
+            ),
+            ai: BossFocusWeakest,
+            placeholder_color: (0.6, 0.5, 0.2),
+        ),
+        (
+            id: "cave_spider",
+            display_name: "Cave Spider",
+            base_stats: (strength: 6, intelligence: 2, piety: 2, vitality: 4, agility: 12, luck: 6),
+            derived_stats: (
+                max_hp: 18, current_hp: 18, max_mp: 0, current_mp: 0,
+                attack: 10, defense: 3, magic_attack: 0, magic_defense: 1,
+                speed: 12, accuracy: 75, evasion: 15,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.15, 0.1, 0.2),
+        ),
+        (
+            id: "hobgoblin",
+            display_name: "Hobgoblin",
+            base_stats: (strength: 12, intelligence: 4, piety: 4, vitality: 14, agility: 5, luck: 4),
+            derived_stats: (
+                max_hp: 48, current_hp: 48, max_mp: 0, current_mp: 0,
+                attack: 12, defense: 7, magic_attack: 0, magic_defense: 2,
+                speed: 5, accuracy: 60, evasion: 4,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.7, 0.15, 0.15),
+        ),
+        (
+            id: "kobold",
+            display_name: "Kobold",
+            base_stats: (strength: 6, intelligence: 4, piety: 4, vitality: 6, agility: 8, luck: 5),
+            derived_stats: (
+                max_hp: 22, current_hp: 22, max_mp: 0, current_mp: 0,
+                attack: 7, defense: 4, magic_attack: 0, magic_defense: 2,
+                speed: 8, accuracy: 55, evasion: 8,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.85, 0.5, 0.15),
+        ),
+        (
+            id: "acid_slime",
+            display_name: "Acid Slime",
+            base_stats: (strength: 5, intelligence: 2, piety: 2, vitality: 6, agility: 3, luck: 3),
+            derived_stats: (
+                max_hp: 16, current_hp: 16, max_mp: 0, current_mp: 0,
+                attack: 6, defense: 6, magic_attack: 0, magic_defense: 4,
+                speed: 3, accuracy: 50, evasion: 5,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.9, 0.85, 0.2),
+        ),
+        (
+            id: "ice_imp",
+            display_name: "Ice Imp",
+            base_stats: (strength: 5, intelligence: 8, piety: 4, vitality: 4, agility: 10, luck: 6),
+            derived_stats: (
+                max_hp: 20, current_hp: 20, max_mp: 6, current_mp: 6,
+                attack: 6, defense: 4, magic_attack: 8, magic_defense: 5,
+                speed: 10, accuracy: 65, evasion: 10,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.3, 0.5, 0.85),
+        ),
+        (
+            id: "wraith",
+            display_name: "Wraith",
+            base_stats: (strength: 4, intelligence: 6, piety: 4, vitality: 6, agility: 14, luck: 8),
+            derived_stats: (
+                max_hp: 24, current_hp: 24, max_mp: 4, current_mp: 4,
+                attack: 8, defense: 3, magic_attack: 6, magic_defense: 4,
+                speed: 14, accuracy: 70, evasion: 22,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.4, 0.85, 0.85),
+        ),
+        (
+            id: "cultist",
+            display_name: "Cultist",
+            base_stats: (strength: 5, intelligence: 10, piety: 8, vitality: 6, agility: 6, luck: 4),
+            derived_stats: (
+                max_hp: 26, current_hp: 26, max_mp: 8, current_mp: 8,
+                attack: 5, defense: 4, magic_attack: 10, magic_defense: 8,
+                speed: 6, accuracy: 60, evasion: 5,
+            ),
+            ai: RandomAttack,
+            placeholder_color: (0.85, 0.3, 0.85),
+        ),
+        (
+            id: "skeleton_lord",
+            display_name: "Skeleton Lord",
+            base_stats: (strength: 14, intelligence: 6, piety: 4, vitality: 16, agility: 8, luck: 5),
+            derived_stats: (
+                max_hp: 90, current_hp: 90, max_mp: 0, current_mp: 0,
+                attack: 14, defense: 10, magic_attack: 0, magic_defense: 6,
+                speed: 8, accuracy: 75, evasion: 8,
+            ),
+            ai: BossAttackDefendAttack(turn: 0),
+            placeholder_color: (0.95, 0.95, 0.95),
+        ),
+    ],
+)
