@@ -140,7 +140,13 @@ pub struct DerivedStats {
     pub magic_attack: u32,
     pub magic_defense: u32,
     pub speed: u32,
+    /// 0–100 percentage scale. Consumed by `damage_calc` as
+    /// `hit_chance = (attacker.accuracy - defender.evasion).clamp(0, 100)`.
+    /// Authored values for enemies live in `*.encounters.ron`; party-member
+    /// values are computed by `derive_stats` from `BaseStats` (see formula
+    /// in `derive_stats`). Both sides MUST share this 0–100 scale.
     pub accuracy: u32,
+    /// 0–100 percentage scale — paired with `accuracy`. See its doc.
     pub evasion: u32,
 }
 
@@ -418,11 +424,18 @@ pub fn derive_stats(
     let stat_magic_attack = (base.intelligence as u32).saturating_add(equip_magic_attack);
     let stat_magic_defense = (base.piety as u32 / 2).saturating_add(equip_magic_defense);
     let mut stat_speed = base.agility as u32;
-    let stat_accuracy = (base.agility as u32 / 2)
-        .saturating_add(base.luck as u32 / 4)
+    // Accuracy / evasion are on a 0-100 percentage scale (consumed by
+    // damage_calc as `(acc - eva).clamp(0, 100)`). Enemies author their
+    // values directly in `*.encounters.ron`; party derives below MUST land
+    // in the same range or combat is unwinnable. Level-1 party with
+    // BaseStats (agi 10, luck 6) lands at acc=73 / eva=13 — see
+    // `derive_stats_party_accuracy_in_winnable_range`.
+    let stat_accuracy = 50_u32
+        .saturating_add((base.agility as u32).saturating_mul(2))
+        .saturating_add(base.luck as u32 / 2)
         .saturating_add(equip_accuracy);
-    let stat_evasion = (base.agility as u32 / 4)
-        .saturating_add(base.luck as u32 / 4)
+    let stat_evasion = (base.agility as u32)
+        .saturating_add(base.luck as u32 / 2)
         .saturating_add(equip_evasion);
 
     let mut max_hp = base_hp.saturating_add(equip_hp_bonus);
@@ -699,6 +712,51 @@ mod tests {
         let derived = derive_stats(&base, &[], &status, 1);
         // base.strength (10) + 50% = 15. (no equipment)
         assert_eq!(derived.attack, 15, "AttackUp 0.5 should yield +50% attack");
+    }
+
+    /// Regression guard: a level-1 party member with the debug-party `BaseStats`
+    /// (agility 10, luck 6) must derive an `accuracy` in the 0-100 percentage
+    /// scale shared with enemy authored values, AND must yield a winnable
+    /// `hit_chance` against the lightest authored enemy in floor_01
+    /// (Goblin: evasion ≈ 3-5).
+    ///
+    /// Before this guard, `derive_stats` returned `accuracy = 6` for the same
+    /// input — under `damage_calc`'s `(acc - eva).clamp(0, 100)`, that gave
+    /// the party a 1-2% hit rate against any enemy and made combat unwinnable
+    /// (surfaced in the #16 playtest after encounters started spawning).
+    #[test]
+    fn derive_stats_party_accuracy_in_winnable_range() {
+        let debug_party_base = BaseStats {
+            strength: 10,
+            intelligence: 8,
+            piety: 8,
+            vitality: 12,
+            agility: 10,
+            luck: 6,
+        };
+        let derived = derive_stats(&debug_party_base, &[], &StatusEffects::default(), 1);
+
+        assert!(
+            derived.accuracy >= 50,
+            "party accuracy ({}) must be on the 0-100 scale (>= 50 for level 1) \
+             so combat against authored enemies is winnable",
+            derived.accuracy,
+        );
+        assert!(
+            derived.evasion >= 5,
+            "party evasion ({}) must be on the 0-100 scale (>= 5 for level 1)",
+            derived.evasion,
+        );
+
+        // Sanity-check against the lightest floor_01 enemy (Goblin eva = 3-5).
+        // hit_chance = (acc - eva).clamp(0, 100). >= 50 means winnable.
+        let goblin_evasion: u32 = 5;
+        let hit_chance = derived.accuracy.saturating_sub(goblin_evasion).min(100);
+        assert!(
+            hit_chance >= 50,
+            "party→Goblin hit_chance ({}) below 50% — combat unwinnable",
+            hit_chance,
+        );
     }
 
     #[test]

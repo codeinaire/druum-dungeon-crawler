@@ -2,6 +2,13 @@
 // ergonomics. WeightedIndex normalises automatically.
 //
 // Inline EnemySpec until #17 ships EnemyDb (D-A4).
+//
+// `accuracy` / `evasion` on `derived_stats` are 0-100 percentages — see the
+// doc on `DerivedStats::accuracy` in `src/plugins/party/character.rs`.
+// Party derives land at acc≈73 / eva≈13 for level 1 (debug-party BaseStats),
+// so authored enemy values must stay in the same range or hit chances become
+// degenerate. Reference points: Goblin = fodder (50/3), Captain = mini-boss
+// (70/5), Cave Spider = dangerous (75/15).
 
 (
     id: "b1f_encounters",
@@ -17,7 +24,7 @@
                         derived_stats: (
                             max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
                             attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
-                            speed: 6, accuracy: 60, evasion: 5,
+                            speed: 6, accuracy: 50, evasion: 3,
                         ),
                         ai: RandomAttack,
                     ),
@@ -35,7 +42,7 @@
                         derived_stats: (
                             max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
                             attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
-                            speed: 6, accuracy: 60, evasion: 5,
+                            speed: 6, accuracy: 50, evasion: 3,
                         ),
                         ai: RandomAttack,
                     ),
@@ -45,7 +52,7 @@
                         derived_stats: (
                             max_hp: 30, current_hp: 30, max_mp: 0, current_mp: 0,
                             attack: 8, defense: 5, magic_attack: 0, magic_defense: 2,
-                            speed: 6, accuracy: 60, evasion: 5,
+                            speed: 6, accuracy: 50, evasion: 3,
                         ),
                         ai: RandomAttack,
                     ),
