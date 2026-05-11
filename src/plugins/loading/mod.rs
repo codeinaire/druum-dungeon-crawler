@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use crate::data::{ClassTable, DungeonFloor, EnemyDb, ItemDb, SpellTable};
+use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, SpellTable};
 use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
@@ -34,6 +34,9 @@ pub struct DungeonAssets {
     // Feature #13 — minimal floor for cross-floor teleport testing (D11-A):
     #[asset(path = "dungeons/floor_02.dungeon.ron")]
     pub floor_02: Handle<DungeonFloor>,
+    // Feature #16 — encounter table for floor 1.
+    #[asset(path = "encounters/floor_01.encounters.ron")]
+    pub encounters_floor_01: Handle<EncounterTable>,
     #[asset(path = "items/core.items.ron")]
     pub item_db: Handle<ItemDb>,
     #[asset(path = "enemies/core.enemies.ron")]
@@ -108,6 +111,7 @@ impl Plugin for LoadingPlugin {
                 RonAssetPlugin::<EnemyDb>::new(&["enemies.ron"]),
                 RonAssetPlugin::<ClassTable>::new(&["classes.ron"]),
                 RonAssetPlugin::<SpellTable>::new(&["spells.ron"]),
+                RonAssetPlugin::<EncounterTable>::new(&["encounters.ron"]), // Feature #16
             ))
             // (2) Drive GameState::Loading -> TitleScreen once all
             //     handles in DungeonAssets report LoadedWithDependencies.
@@ -216,6 +220,22 @@ fn spawn_loading_screen(mut commands: Commands) {
 fn despawn_loading_screen(mut commands: Commands, roots: Query<Entity, With<LoadingScreenRoot>>) {
     for e in &roots {
         commands.entity(e).despawn();
+    }
+}
+
+/// Returns the `EncounterTable` handle for `floor_number` from `DungeonAssets`.
+/// Falls back to `floor_01` for unknown floor numbers and emits a warning.
+/// Mirrors `dungeon::floor_handle_for` precedent. Future floors add match arms.
+pub(crate) fn encounter_table_for(
+    assets: &DungeonAssets,
+    floor_number: u32,
+) -> &Handle<EncounterTable> {
+    match floor_number {
+        1 => &assets.encounters_floor_01,
+        n => {
+            warn!("No EncounterTable handle for floor {n}; falling back to floor_01");
+            &assets.encounters_floor_01
+        }
     }
 }
 

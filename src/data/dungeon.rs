@@ -829,4 +829,29 @@ mod tests {
             floor.validate_wall_consistency()
         );
     }
+
+    /// Regression guard for Feature #16: at least some walkable cells in
+    /// `floor_01.dungeon.ron` must have a non-zero `encounter_rate`. Without
+    /// authored rates every cell defaults to 0.0 and `check_random_encounter`
+    /// can never trigger, no matter how many steps the player takes.
+    #[test]
+    fn floor_01_has_authored_encounter_rates() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets/dungeons/floor_01.dungeon.ron");
+        let contents = std::fs::read_to_string(&path).expect("read floor_01");
+        let floor: DungeonFloor = ron::de::from_str(&contents).expect("parse floor_01");
+
+        let cells_with_rate = floor
+            .features
+            .iter()
+            .flatten()
+            .filter(|c| c.encounter_rate > 0.0)
+            .count();
+
+        assert!(
+            cells_with_rate >= 4,
+            "floor_01 has only {cells_with_rate} cell(s) with encounter_rate > 0.0; \
+             encounters cannot trigger reliably during play",
+        );
+    }
 }

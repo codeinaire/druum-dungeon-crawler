@@ -444,9 +444,14 @@ mod app_tests {
         ));
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
         // tick_on_dungeon_step reads MessageReader<MovedEvent>; register it so the
         // system does not panic under default features (DungeonPlugin not loaded here).
         app.add_message::<crate::plugins::dungeon::MovedEvent>();
+        // EncounterPlugin (inside CombatPlugin) reads/writes EncounterRequested.
+        // CellFeaturesPlugin normally registers this; explicit here since
+        // CellFeaturesPlugin is not included in this test app (Feature #16).
+        app.add_message::<crate::plugins::dungeon::features::EncounterRequested>();
         // ActionState<MenuNavAction> required by handle_combat_input.
         // Inserted directly (without ActionsPlugin) to avoid mouse-resource panic.
         app.init_resource::<ActionState<MenuNavAction>>();

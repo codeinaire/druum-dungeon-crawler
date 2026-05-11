@@ -675,6 +675,7 @@ mod tests {
             enemy_db: Handle::default(),
             class_table: Handle::default(),
             spell_table: Handle::default(),
+            encounters_floor_01: Handle::default(), // Feature #16
         });
 
         // Drive into Dungeon and emit a move to (1, 0).

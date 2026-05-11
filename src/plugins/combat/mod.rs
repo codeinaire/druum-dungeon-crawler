@@ -7,6 +7,7 @@ pub mod actions;
 pub mod ai;
 pub mod combat_log;
 pub mod damage;
+pub mod encounter;
 pub mod enemy;
 pub mod status_effects;
 pub mod targeting;
@@ -23,6 +24,8 @@ pub use status_effects::*;
 ///
 /// Feature #15 adds `TurnManagerPlugin`, `EnemyAiPlugin`, and `CombatUiPlugin`
 /// as sub-plugins (turn manager → damage → AI → UI).
+///
+/// Feature #16 adds `EncounterPlugin` (random rolls + combat entry).
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -31,6 +34,7 @@ impl Plugin for CombatPlugin {
             .add_plugins(turn_manager::TurnManagerPlugin)
             .add_plugins(ai::EnemyAiPlugin)
             .add_plugins(ui_combat::CombatUiPlugin)
+            .add_plugins(encounter::EncounterPlugin) // Feature #16
             .add_systems(OnEnter(GameState::Combat), || {
                 info!("Entered GameState::Combat")
             })
