@@ -9,6 +9,7 @@ pub mod combat_log;
 pub mod damage;
 pub mod encounter;
 pub mod enemy;
+pub mod enemy_render;
 pub mod status_effects;
 pub mod targeting;
 pub mod turn_manager;
@@ -35,6 +36,7 @@ impl Plugin for CombatPlugin {
             .add_plugins(ai::EnemyAiPlugin)
             .add_plugins(ui_combat::CombatUiPlugin)
             .add_plugins(encounter::EncounterPlugin) // Feature #16
+            .add_plugins(enemy_render::EnemyRenderPlugin) // Feature #17
             .add_systems(OnEnter(GameState::Combat), || {
                 info!("Entered GameState::Combat")
             })

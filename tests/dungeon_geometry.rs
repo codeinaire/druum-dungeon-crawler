@@ -79,7 +79,12 @@ fn dungeon_geometry_spawns_for_floor_01() {
     // spawn_dungeon_geometry requires Assets<Mesh> and Assets<StandardMaterial>.
     // In production these are registered by MeshPlugin/PbrPlugin (via DefaultPlugins).
     // In headless integration tests we init them explicitly.
-    app.init_asset::<Mesh>().init_asset::<StandardMaterial>();
+    // Image + TextureAtlasLayout also required by bevy_sprite3d's bundle_builder
+    // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin). Feature #17.
+    app.init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::image::TextureAtlasLayout>();
 
     // PartyPlugin's populate_item_handle_registry fires on OnExit(Loading) and
     // requires Assets<ItemDb>. Register it explicitly since LoadingPlugin is absent.
@@ -87,6 +92,9 @@ fn dungeon_geometry_spawns_for_floor_01() {
 
     // EncounterPlugin (inside CombatPlugin) needs Assets<EncounterTable>. Feature #16.
     app.init_asset::<druum::data::EncounterTable>();
+
+    // EnemyRenderPlugin (via CombatPlugin) reads Assets<EnemyDb>. Feature #17.
+    app.init_asset::<druum::data::EnemyDb>();
 
     // handle_dungeon_input writes SfxRequest messages. AudioPlugin registers
     // this in production; in headless tests we register it directly.

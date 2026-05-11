@@ -16,6 +16,7 @@
 use bevy::prelude::*;
 
 use crate::plugins::combat::ai::EnemyAi;
+use crate::plugins::combat::enemy_render::{EnemyAnimation, EnemyVisual};
 use crate::plugins::party::Equipment;
 use crate::plugins::party::character::{
     BaseStats, DerivedStats, Experience, PartyRow, StatusEffects,
@@ -36,6 +37,10 @@ pub struct EnemyIndex(pub u32);
 /// Enemy entity spawn bundle. Includes `Equipment::default()` and
 /// `Experience::default()` to satisfy the (now `PartyMember`-less)
 /// recompute query (D-A5 carve-out).
+///
+/// `visual` and `animation` are populated by Feature #17. `EnemyVisual.id`
+/// is empty by default; `combat/encounter.rs` populates it from `EnemySpec.id`
+/// after the spawn.
 #[derive(Bundle, Default)]
 pub struct EnemyBundle {
     pub marker: Enemy,
@@ -48,6 +53,9 @@ pub struct EnemyBundle {
     pub equipment: Equipment,
     pub experience: Experience,
     pub ai: EnemyAi,
+    // Feature #17 additions:
+    pub visual: EnemyVisual,
+    pub animation: EnemyAnimation,
 }
 
 #[cfg(test)]

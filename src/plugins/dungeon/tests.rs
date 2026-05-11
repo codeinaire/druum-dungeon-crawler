@@ -167,11 +167,15 @@ fn make_test_app() -> App {
     app.init_asset::<DungeonFloor>();
     app.init_asset::<crate::data::ItemDb>();
     app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
+    app.init_asset::<crate::data::EnemyDb>(); // Feature #17 (handle_encounter_request reads Assets<EnemyDb> in Dungeon state)
     // Init mesh and material asset registries so spawn_test_scene's
     // ResMut<Assets<Mesh>> and ResMut<Assets<StandardMaterial>> parameters
     // are satisfied without the full PbrPlugin chain.
     app.init_asset::<Mesh>();
     app.init_asset::<StandardMaterial>();
+    // Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder (EnemyRenderPlugin via CombatPlugin).
+    app.init_asset::<bevy::image::Image>();
+    app.init_asset::<bevy::image::TextureAtlasLayout>();
     // Register SfxRequest messages. In production, AudioPlugin does this.
     // In tests we only have DungeonPlugin (which registers MovedEvent) but
     // handle_dungeon_input also writes SfxRequest — so the message type must

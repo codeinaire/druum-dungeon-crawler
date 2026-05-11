@@ -25,8 +25,14 @@ use crate::plugins::party::character::{BaseStats, DerivedStats};
 /// Inline enemy spec for #16. Fields mirror `EnemyBundle` (`combat/enemy.rs:39-51`).
 ///
 /// Until #17 ships `EnemyDb`, encounter tables carry full enemy stats inline.
+/// Feature #17 added `id: String` (additive `#[serde(default)]`) for visual
+/// lookup — empty-id falls back to a default grey placeholder colour.
 #[derive(Reflect, Serialize, Deserialize, Debug, Clone)]
 pub struct EnemySpec {
+    /// Lookup key into `EnemyDb` for visual data. Empty string means
+    /// "no visual lookup" — fall back to default grey colour.
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub base_stats: BaseStats,
     pub derived_stats: DerivedStats,
@@ -97,6 +103,7 @@ mod tests {
 
     fn mk_spec(name: &str, hp: u32) -> EnemySpec {
         EnemySpec {
+            id: name.to_lowercase(),
             name: name.into(),
             base_stats: BaseStats::default(),
             derived_stats: DerivedStats {

@@ -26,6 +26,10 @@ bevy_common_assets = { version = "=0.16.0", features = ["ron"] }
 bevy_asset_loader  = "=0.26.0"
 leafwing-input-manager = { version = "=0.20.0", default-features = false, features = ["keyboard", "mouse"] }
 bevy_egui = { version = "=0.39.1", default-features = false, features = ["render", "default_fonts"] }
+# bevy_sprite3d 8.0 <-> bevy 0.18. Provides Sprite/Sprite3d components that build
+# a cached textured 3D quad with `unlit` / `alpha_mode` / `pixels_per_metre`.
+# The crate does NOT auto-billboard — see face_camera system in enemy_render.rs.
+bevy_sprite3d = "8"
 # serde and ron are transitively present via Bevy but must be declared explicitly
 # in Rust 2024 edition to be usable as direct crate references in our source.
 serde = { version = "1", features = ["derive"] }

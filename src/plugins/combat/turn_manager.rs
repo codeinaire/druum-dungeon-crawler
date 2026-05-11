@@ -743,6 +743,13 @@ mod app_tests {
         app.init_asset::<crate::data::ItemAsset>();
         app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
         app.init_asset::<crate::data::DungeonFloor>(); // Feature #16 (check_random_encounter reads Assets<DungeonFloor>)
+        app.init_asset::<crate::data::EnemyDb>(); // Feature #17 (handle_encounter_request reads Assets<EnemyDb> in Dungeon state)
+        // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
+        // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin; MinimalPlugins lacks PbrPlugin).
+        app.init_asset::<bevy::prelude::Mesh>();
+        app.init_asset::<bevy::pbr::StandardMaterial>();
+        app.init_asset::<bevy::image::Image>();
+        app.init_asset::<bevy::image::TextureAtlasLayout>();
         // ActiveFloorNumber required by check_random_encounter (EncounterPlugin) which
         // runs in Dungeon state (victory transitions back to Dungeon). Feature #16.
         app.init_resource::<crate::plugins::dungeon::ActiveFloorNumber>();

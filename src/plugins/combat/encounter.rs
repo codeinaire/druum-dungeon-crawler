@@ -43,9 +43,11 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::data::DungeonFloor;
+use crate::data::EnemyDb;
 use crate::data::EncounterTable;
 use crate::plugins::audio::{SfxKind, SfxRequest};
 use crate::plugins::combat::enemy::{Enemy, EnemyBundle, EnemyIndex, EnemyName};
+use crate::plugins::combat::enemy_render::EnemyVisual;
 use crate::plugins::dungeon::{
     ActiveFloorNumber, MovedEvent, MovementAnimation, PlayerParty, floor_handle_for,
     handle_dungeon_input,
@@ -321,6 +323,7 @@ fn handle_encounter_request(
     mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
     encounter_tables: Res<Assets<EncounterTable>>,
+    enemy_dbs: Res<Assets<EnemyDb>>,
     dungeon_assets: Option<Res<DungeonAssets>>,
     active_floor: Res<ActiveFloorNumber>,
     mut rng: ResMut<EncounterRng>,
@@ -352,6 +355,15 @@ fn handle_encounter_request(
         return;
     };
 
+    // Resolve EnemyDb for visual lookups. Absent EnemyDb is recoverable —
+    // spawn_enemy_billboards falls back to DEFAULT_PLACEHOLDER_COLOR when
+    // EnemyVisual.id doesn't resolve. We still emit a warn! to flag the
+    // asset-loading regression.
+    let enemy_db = enemy_dbs.get(&assets.enemy_db);
+    if enemy_db.is_none() {
+        warn!("EnemyDb not yet loaded — enemies will use default placeholder colour");
+    }
+
     // Trust-boundary cap on enemy count (Security §Architectural Risks).
     let enemies_to_spawn = if group.enemies.len() > MAX_ENEMIES_PER_ENCOUNTER {
         warn!(
@@ -376,6 +388,18 @@ fn handle_encounter_request(
                 ..Default::default()
             })
             .id();
+
+        // Feature #17: populate EnemyVisual from EnemyDb lookup.
+        // Empty id (back-compat with inline EnemySpec) → default grey colour.
+        let placeholder_color = enemy_db
+            .and_then(|db| db.find(&spec.id))
+            .map(|def| def.placeholder_color)
+            .unwrap_or([0.5, 0.5, 0.5]); // mirrors DEFAULT_PLACEHOLDER_COLOR
+        commands.entity(entity).insert(EnemyVisual {
+            id: spec.id.clone(),
+            placeholder_color,
+        });
+
         entities.push(entity);
     }
 
@@ -504,6 +528,7 @@ mod tests {
 
         // Build a group with 12 enemies — well over the cap of 8.
         let mk = |n: &str| EnemySpec {
+            id: n.to_lowercase(),
             name: n.into(),
             base_stats: BaseStats::default(),
             derived_stats: DerivedStats::default(),
@@ -570,6 +595,13 @@ mod app_tests {
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
         app.init_asset::<crate::data::EncounterTable>();
+        app.init_asset::<crate::data::EnemyDb>();
+        // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
+        // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin; MinimalPlugins lacks PbrPlugin).
+        app.init_asset::<bevy::prelude::Mesh>();
+        app.init_asset::<bevy::pbr::StandardMaterial>();
+        app.init_asset::<bevy::image::Image>();
+        app.init_asset::<bevy::image::TextureAtlasLayout>();
         // MovedEvent is owned by DungeonPlugin (mod.rs:224); register here so
         // MessageReader<MovedEvent> doesn't panic when DungeonPlugin isn't loaded.
         app.add_message::<crate::plugins::dungeon::MovedEvent>();

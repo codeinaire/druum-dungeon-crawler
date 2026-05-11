@@ -773,9 +773,14 @@ mod app_tests {
         app.init_asset::<crate::data::ItemDb>();
         // EncounterTable needed by EncounterPlugin (inside CombatPlugin) for handle_encounter_request.
         app.init_asset::<crate::data::EncounterTable>(); // Feature #16
+        // EnemyDb needed by handle_encounter_request (runs in Dungeon state). Feature #17.
+        app.init_asset::<crate::data::EnemyDb>(); // Feature #17
         // Mesh + StandardMaterial needed by DungeonPlugin's spawn_dungeon_geometry.
         app.init_asset::<bevy::prelude::Mesh>();
         app.init_asset::<bevy::pbr::StandardMaterial>();
+        // Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder (EnemyRenderPlugin via CombatPlugin).
+        app.init_asset::<bevy::image::Image>();
+        app.init_asset::<bevy::image::TextureAtlasLayout>();
         // SfxRequest messages: written by CellFeaturesPlugin but registered by AudioPlugin.
         // Explicit registration required in tests (same pattern as dungeon/tests.rs:171).
         app.add_message::<SfxRequest>();
