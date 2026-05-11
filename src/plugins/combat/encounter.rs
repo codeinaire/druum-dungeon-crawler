@@ -45,7 +45,7 @@ use rand::Rng;
 use crate::data::DungeonFloor;
 use crate::data::EncounterTable;
 use crate::plugins::audio::{SfxKind, SfxRequest};
-use crate::plugins::combat::enemy::{EnemyBundle, EnemyIndex, EnemyName};
+use crate::plugins::combat::enemy::{Enemy, EnemyBundle, EnemyIndex, EnemyName};
 use crate::plugins::dungeon::{
     ActiveFloorNumber, MovedEvent, MovementAnimation, PlayerParty, floor_handle_for,
     handle_dungeon_input,
@@ -197,7 +197,20 @@ fn snap_movement_animation_on_combat_entry(
     }
 }
 
-fn clear_current_encounter(mut commands: Commands) {
+/// Tear down the encounter on `OnExit(Combat)`: despawn every `Enemy`-marked
+/// entity in the world, then remove the `CurrentEncounter` resource.
+///
+/// Sweeping by marker (rather than only the entities listed in
+/// `CurrentEncounter.enemy_entities`) is intentional — there is no other
+/// production spawner of `Enemy`, so anything still carrying the marker
+/// after combat is by definition stale. Without this sweep, dead enemies
+/// from a prior encounter remain in the world and reappear in the next
+/// combat's `Query<Entity, With<Enemy>>` result, showing up as
+/// already-dead corpses in the new fight.
+fn clear_current_encounter(mut commands: Commands, enemies: Query<Entity, With<Enemy>>) {
+    for entity in &enemies {
+        commands.entity(entity).despawn();
+    }
     commands.remove_resource::<CurrentEncounter>();
 }
 
@@ -882,16 +895,23 @@ mod app_tests {
     }
 
     /// Verify `clear_current_encounter` (the `OnExit(Combat)` system) removes
-    /// `CurrentEncounter` when the state machine exits Combat.
+    /// both the `CurrentEncounter` resource AND every `Enemy`-marked entity.
     ///
     /// This covers the same invariant as `current_encounter_removed_on_combat_exit`
     /// but with the name listed in the PR test plan, enshrining it as a named guard.
+    ///
+    /// The original version of this test inserted `CurrentEncounter` with an
+    /// empty `enemy_entities` vec, so the entity-despawn path was never
+    /// exercised — a playtest surfaced corpses from prior encounters reappearing
+    /// in fresh fights. This version spawns real `EnemyBundle` entities first.
     #[test]
     fn no_current_encounter_after_combat_exit() {
         let mut app = make_test_app();
-        // Simulate a prior combat by inserting CurrentEncounter directly.
+        // Spawn real enemy entities so the despawn path is actually tested.
+        let e1 = app.world_mut().spawn(EnemyBundle::default()).id();
+        let e2 = app.world_mut().spawn(EnemyBundle::default()).id();
         app.world_mut().insert_resource(CurrentEncounter {
-            enemy_entities: vec![],
+            enemy_entities: vec![e1, e2],
             fleeable: true,
         });
         // Enter Combat state.
@@ -910,6 +930,25 @@ mod app_tests {
         assert!(
             app.world().get_resource::<CurrentEncounter>().is_none(),
             "CurrentEncounter must be removed by clear_current_encounter on OnExit(Combat)"
+        );
+        // Both Enemy entities must be despawned — otherwise they leak into
+        // the next encounter as dead corpses.
+        assert!(
+            app.world().get_entity(e1).is_err(),
+            "stale Enemy entity {e1:?} survived OnExit(Combat)"
+        );
+        assert!(
+            app.world().get_entity(e2).is_err(),
+            "stale Enemy entity {e2:?} survived OnExit(Combat)"
+        );
+        let lingering: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Enemy>>()
+            .iter(app.world())
+            .collect();
+        assert!(
+            lingering.is_empty(),
+            "no Enemy-marked entities should remain after OnExit(Combat); found {lingering:?}"
         );
     }
 
