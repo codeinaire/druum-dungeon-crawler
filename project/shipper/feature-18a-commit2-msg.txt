@@ -1,0 +1,7 @@
+docs: add feature/18a research, plan, and implementation summary
+
+Research, plan (Status: Complete), and implementation summary for Feature
+#18a (Town Square, Shop, Inn). Updates PIPELINE-STATE.md to reflect
+all 6 quality gates GREEN as of 2026-05-11 (260+6 / 264+6 tests pass).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

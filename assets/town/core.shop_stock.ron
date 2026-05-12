@@ -1,0 +1,33 @@
+// Feature #18a — Town shop catalogue.
+// All items reference IDs from assets/items/core.items.ron.
+// min_floor: 0 means always available (floor-gating wired but not exercised in #18a tests).
+// buy_price: absent means "use ItemAsset::value" (the default).
+(
+    items: [
+        // ── Weapons ──────────────────────────────────────────────────────────
+        (
+            item_id: "rusty_sword",
+        ),
+        (
+            item_id: "oak_staff",
+        ),
+        (
+            item_id: "wooden_mace",
+        ),
+        // ── Armor ────────────────────────────────────────────────────────────
+        (
+            item_id: "leather_armor",
+        ),
+        (
+            item_id: "robe",
+        ),
+        // ── Shield ───────────────────────────────────────────────────────────
+        (
+            item_id: "wooden_shield",
+        ),
+        // ── Consumable ───────────────────────────────────────────────────────
+        (
+            item_id: "healing_potion",
+        ),
+    ],
+)
