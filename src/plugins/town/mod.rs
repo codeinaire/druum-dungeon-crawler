@@ -1,4 +1,4 @@
-//! Town hub plugin — Square, Shop, Inn, and placeholder Temple/Guild screens.
+//! Town hub plugin — Square, Shop, Inn, Temple, and Guild screens.
 //!
 //! ## Architecture
 //!
@@ -7,7 +7,8 @@
 //! attached to the same entity so despawning `TownCameraRoot` atomically
 //! removes both — no orphaned context that silently breaks painters.
 //!
-//! Each sub-state has:
+//! Each Town sub-state (Square / Shop / Inn / Temple / Guild) has its own
+//! painter + handler module:
 //! - A **painter** in `EguiPrimaryContextPass` — read-only, no mutations.
 //! - An **input handler** in `Update` — may mutate resources / spawn entities.
 //!
@@ -17,27 +18,34 @@
 //! ## Modules
 //!
 //! - `gold` — `Gold` resource + `GameClock` day/turn counter.
-//! - `square` — main navigation hub.
-//! - `shop` — buy/sell items.
+//! - `guild` — party roster: recruit, dismiss, row swap, slot swap.
 //! - `inn` — rest, heal, cure Poison.
-//! - `placeholder` — Temple/Guild "Coming in #18b" stub.
+//! - `shop` — buy/sell items.
+//! - `square` — main navigation hub.
+//! - `temple` — revive Dead characters and cure Stone/Paralysis/Sleep.
 
 use bevy::prelude::*;
 use bevy_egui::{EguiPrimaryContextPass, PrimaryEguiContext};
 
 pub mod gold;
+pub mod guild;
 pub mod inn;
-pub mod placeholder;
 pub mod shop;
 pub mod square;
+pub mod temple;
 
 pub use gold::{GameClock, Gold, SpendError};
 
 use crate::plugins::state::{GameState, TownLocation};
 
+use guild::{
+    DismissedPool, GuildState,
+    handle_guild_dismiss, handle_guild_input, handle_guild_recruit,
+    handle_guild_row_swap, handle_guild_slot_swap, paint_guild,
+};
 use inn::{InnState, handle_inn_rest, paint_inn};
-use placeholder::{handle_placeholder_input, paint_placeholder};
 use shop::{ShopState, handle_shop_input, paint_shop};
+use temple::{TempleState, handle_temple_action, paint_temple};
 use square::{SquareMenuState, handle_square_input, paint_town_square};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,7 +95,10 @@ impl Plugin for TownPlugin {
             .init_resource::<GameClock>()
             .init_resource::<SquareMenuState>()
             .init_resource::<ShopState>()
-            .init_resource::<InnState>();
+            .init_resource::<InnState>()
+            .init_resource::<TempleState>()
+            .init_resource::<GuildState>()
+            .init_resource::<DismissedPool>();
 
         // Camera lifecycle.
         app.add_systems(OnEnter(GameState::Town), spawn_town_camera)
@@ -103,8 +114,10 @@ impl Plugin for TownPlugin {
                     .run_if(in_state(TownLocation::Shop)),
                 paint_inn
                     .run_if(in_state(TownLocation::Inn)),
-                paint_placeholder
-                    .run_if(in_state(TownLocation::Temple).or(in_state(TownLocation::Guild))),
+                paint_temple
+                    .run_if(in_state(TownLocation::Temple)),
+                paint_guild
+                    .run_if(in_state(TownLocation::Guild)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
@@ -119,8 +132,18 @@ impl Plugin for TownPlugin {
                     .run_if(in_state(TownLocation::Shop)),
                 handle_inn_rest
                     .run_if(in_state(TownLocation::Inn)),
-                handle_placeholder_input
-                    .run_if(in_state(TownLocation::Temple).or(in_state(TownLocation::Guild))),
+                handle_temple_action
+                    .run_if(in_state(TownLocation::Temple)),
+                handle_guild_input
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_recruit
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_dismiss
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_row_swap
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_slot_swap
+                    .run_if(in_state(TownLocation::Guild)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
@@ -145,9 +168,10 @@ mod tests {
     use crate::plugins::party::inventory::{EquipmentChangedEvent, ItemHandleRegistry};
     use crate::plugins::state::{GameState, TownLocation};
     use super::{spawn_town_camera, despawn_town_camera, TownCameraRoot};
+    use crate::plugins::town::guild::{DismissedPool, GuildState, handle_guild_dismiss, handle_guild_input, handle_guild_recruit, handle_guild_row_swap, handle_guild_slot_swap};
     use crate::plugins::town::inn::{InnState, handle_inn_rest};
-    use crate::plugins::town::placeholder::handle_placeholder_input;
     use crate::plugins::town::shop::{ShopState, handle_shop_input};
+    use crate::plugins::town::temple::{TempleState, handle_temple_action};
     use crate::plugins::town::square::{SquareMenuState, handle_square_input};
 
     /// Minimal plugin set for Town tests (no audio, no dungeon, no combat, no render).
@@ -181,7 +205,7 @@ mod tests {
         app.init_asset::<RecruitPool>();
         app.init_asset::<TownServices>();
 
-        // EquipmentChangedEvent must be registered for handle_inn_rest.
+        // EquipmentChangedEvent must be registered for handle_inn_rest and handle_temple_action.
         app.add_message::<EquipmentChangedEvent>();
 
         // ItemAsset must be registered for shop painters.
@@ -207,11 +231,19 @@ mod tests {
             .add_systems(OnExit(GameState::Town), despawn_town_camera);
 
         // Input handler systems in Update (no EguiPrimaryContextPass dependency).
+        use crate::plugins::party::character::PartySize;
         app.init_resource::<SquareMenuState>()
             .init_resource::<ShopState>()
             .init_resource::<InnState>()
+            .init_resource::<TempleState>()
+            .init_resource::<GuildState>()
+            .init_resource::<DismissedPool>()
             .init_resource::<Gold>()
-            .init_resource::<GameClock>();
+            .init_resource::<GameClock>()
+            .init_resource::<PartySize>();
+
+        // Guild handlers need ButtonInput<KeyCode>.
+        app.init_resource::<ButtonInput<KeyCode>>();
 
         app.add_systems(
             Update,
@@ -219,8 +251,12 @@ mod tests {
                 handle_square_input.run_if(in_state(TownLocation::Square)),
                 handle_shop_input.run_if(in_state(TownLocation::Shop)),
                 handle_inn_rest.run_if(in_state(TownLocation::Inn)),
-                handle_placeholder_input
-                    .run_if(in_state(TownLocation::Temple).or(in_state(TownLocation::Guild))),
+                handle_temple_action.run_if(in_state(TownLocation::Temple)),
+                handle_guild_input.run_if(in_state(TownLocation::Guild)),
+                handle_guild_recruit.run_if(in_state(TownLocation::Guild)),
+                handle_guild_dismiss.run_if(in_state(TownLocation::Guild)),
+                handle_guild_row_swap.run_if(in_state(TownLocation::Guild)),
+                handle_guild_slot_swap.run_if(in_state(TownLocation::Guild)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
