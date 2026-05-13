@@ -32,7 +32,7 @@ use crate::data::items::ItemAsset;
 use crate::data::town::{MAX_SHOP_ITEMS, ShopStock, clamp_shop_stock};
 use crate::plugins::input::MenuAction;
 use crate::plugins::loading::TownAssets;
-use crate::plugins::party::character::{CharacterName, PartyMember};
+use crate::plugins::party::character::{CharacterName, PartyMember, PartySlot};
 use crate::plugins::party::inventory::{Inventory, ItemHandleRegistry, ItemInstance, give_item};
 use crate::plugins::state::TownLocation;
 use crate::plugins::town::gold::Gold;
@@ -209,6 +209,7 @@ pub fn sell_item(
 ///
 /// **Read-only** — no `ResMut<T>` or `Commands`. All mutations live in
 /// `handle_shop_input`.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_shop(
     mut contexts: EguiContexts,
     shop_state: Res<ShopState>,
@@ -216,7 +217,8 @@ pub fn paint_shop(
     town_assets: Option<Res<TownAssets>>,
     shop_stock_assets: Res<Assets<ShopStock>>,
     item_assets: Res<Assets<ItemAsset>>,
-    party: Query<(Entity, &CharacterName, &Inventory), With<PartyMember>>,
+    instances: Query<&ItemInstance>,
+    party: Query<(Entity, &CharacterName, &PartySlot, &Inventory), With<PartyMember>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -234,7 +236,22 @@ pub fn paint_shop(
     });
 
     egui::TopBottomPanel::bottom("shop_footer").show(ctx, |ui| {
-        ui.label("[Left/Right] Switch mode  |  [Up/Down] Navigate  |  [Enter] Confirm  |  [Esc] Back");
+        // Party-target strip: shows all members, current target highlighted.
+        let mut members: Vec<(&CharacterName, &PartySlot, &Inventory)> =
+            party.iter().map(|(_, name, slot, inv)| (name, slot, inv)).collect();
+        members.sort_by_key(|(_, slot, _)| slot.0);
+        ui.horizontal(|ui| {
+            ui.label("Party:");
+            for (i, (name, slot, inv)) in members.iter().enumerate() {
+                let label = format!("[{}] {} ({}/{})", slot.0, name.0, inv.0.len(), MAX_INVENTORY_PER_CHARACTER);
+                if i == shop_state.party_target {
+                    ui.colored_label(egui::Color32::YELLOW, format!("> {label}"));
+                } else {
+                    ui.label(label);
+                }
+            }
+        });
+        ui.label("[Left/Right] Mode  |  [ ] / [ ] Party member  |  [Up/Down] Navigate  |  [Enter] Confirm  |  [Esc] Back");
     });
 
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -271,11 +288,11 @@ pub fn paint_shop(
                 }
             }
             ShopMode::Sell => {
-                // Show the first party member's inventory (Tab switching = #25).
-                let mut members: Vec<(Entity, &CharacterName, &Inventory)> =
+                // Sort by PartySlot (matches dev hotkeys, Temple, Guild conventions).
+                let mut members: Vec<(Entity, &CharacterName, &PartySlot, &Inventory)> =
                     party.iter().collect();
-                members.sort_by_key(|(e, _, _)| *e);
-                let Some((_, char_name, inventory)) = members.get(shop_state.party_target) else {
+                members.sort_by_key(|(_, _, slot, _)| slot.0);
+                let Some((_, char_name, _, inventory)) = members.get(shop_state.party_target) else {
                     ui.label("(no party member)");
                     return;
                 };
@@ -284,8 +301,23 @@ pub fn paint_shop(
                 if inventory.0.is_empty() {
                     ui.label("(empty)");
                 } else {
-                    for (i, _item_entity) in inventory.0.iter().enumerate() {
-                        let label = format!("item slot {i}");
+                    for (i, item_entity) in inventory.0.iter().enumerate() {
+                        // Resolve the human-readable item name via ItemInstance → ItemAsset.
+                        let name = instances
+                            .get(*item_entity)
+                            .ok()
+                            .and_then(|inst| item_assets.get(&inst.0))
+                            .map(|a| a.display_name.clone())
+                            .unwrap_or_else(|| format!("item slot {i}"));
+                        let price = instances
+                            .get(*item_entity)
+                            .ok()
+                            .and_then(|inst| item_assets.get(&inst.0))
+                            .map(|a| a.value / 2);
+                        let price_str = price
+                            .map(|p| format!(" — sells for {p} gold"))
+                            .unwrap_or_default();
+                        let label = format!("{name}{price_str}");
                         if i == shop_state.cursor {
                             ui.colored_label(egui::Color32::YELLOW, format!("> {label}"));
                         } else {
@@ -328,7 +360,8 @@ pub fn handle_shop_input(
     item_assets: Res<Assets<ItemAsset>>,
     registry: Res<ItemHandleRegistry>,
     instances: Query<&ItemInstance>,
-    mut char_query: Query<(Entity, &mut Inventory), With<PartyMember>>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
+    mut char_query: Query<(Entity, &PartySlot, &mut Inventory), With<PartyMember>>,
 ) {
     if actions.just_pressed(&MenuAction::Cancel) {
         next_sub.set(TownLocation::Square);
@@ -344,6 +377,25 @@ pub fn handle_shop_input(
         return;
     }
 
+    // Party-target cycling — `[`/`]` step through which member is active.
+    let party_count = char_query.iter().count();
+    if party_count > 0 {
+        if actions.just_pressed(&MenuAction::PrevTarget) {
+            shop_state.party_target = if shop_state.party_target == 0 {
+                party_count - 1
+            } else {
+                shop_state.party_target - 1
+            };
+            shop_state.cursor = 0;
+            return;
+        }
+        if actions.just_pressed(&MenuAction::NextTarget) {
+            shop_state.party_target = (shop_state.party_target + 1) % party_count;
+            shop_state.cursor = 0;
+            return;
+        }
+    }
+
     // Determine list length for cursor clamping.
     let list_len: usize = match shop_state.mode {
         ShopMode::Buy => town_assets
@@ -352,11 +404,11 @@ pub fn handle_shop_input(
             .map(|s| s.items.len().min(MAX_SHOP_ITEMS))
             .unwrap_or(0),
         ShopMode::Sell => {
-            let mut entries: Vec<(Entity, usize)> = char_query
+            let mut entries: Vec<(usize, usize)> = char_query
                 .iter()
-                .map(|(e, inv)| (e, inv.0.len()))
+                .map(|(_, slot, inv)| (slot.0, inv.0.len()))
                 .collect();
-            entries.sort_by_key(|(e, _)| *e);
+            entries.sort_by_key(|(slot, _)| *slot);
             entries
                 .get(shop_state.party_target)
                 .map(|(_, len)| *len)
@@ -393,10 +445,13 @@ pub fn handle_shop_input(
                 None => return,
             };
 
-            // Sort party members deterministically by Entity to pick the v1 target.
-            let mut entities: Vec<Entity> = char_query.iter().map(|(e, _)| e).collect();
-            entities.sort();
-            let Some(&char_entity) = entities.get(shop_state.party_target) else {
+            // Sort party by PartySlot for deterministic target resolution.
+            let mut entities: Vec<(Entity, usize)> = char_query
+                .iter()
+                .map(|(e, slot, _)| (e, slot.0))
+                .collect();
+            entities.sort_by_key(|(_, slot)| *slot);
+            let Some(&(char_entity, _)) = entities.get(shop_state.party_target) else {
                 info!("shop buy: no party member at target index {}", shop_state.party_target);
                 return;
             };
@@ -419,21 +474,23 @@ pub fn handle_shop_input(
             // Step 3: inventory cap BEFORE gold check.
             let inv_len = char_query
                 .get(char_entity)
-                .map(|(_, inv)| inv.0.len())
+                .map(|(_, _, inv)| inv.0.len())
                 .unwrap_or(MAX_INVENTORY_PER_CHARACTER);
             if inv_len >= MAX_INVENTORY_PER_CHARACTER {
                 info!("shop buy: inventory full");
+                toasts.push("Inventory full.");
                 return;
             }
             // Step 4: gold check.
             if gold.0 < price {
                 info!("shop buy: insufficient gold (have {}, need {})", gold.0, price);
+                toasts.push(format!("Not enough gold ({price}g needed)."));
                 return;
             }
             // Step 5: give item.
             let item_ent = commands.spawn(ItemInstance(handle)).id();
             match char_query.get_mut(char_entity) {
-                Ok((_, mut inv)) => {
+                Ok((_, _, mut inv)) => {
                     inv.0.push(item_ent);
                 }
                 Err(_) => {
@@ -444,25 +501,35 @@ pub fn handle_shop_input(
             }
             // Step 6: deduct gold only after successful give.
             let _ = gold.try_spend(price);
+            // Resolve display name for the toast (fall back to id).
+            let display = item_assets
+                .iter()
+                .find(|(_, a)| a.id == item_id)
+                .map(|(_, a)| a.display_name.clone())
+                .unwrap_or_else(|| item_id.clone());
+            toasts.push(format!("Bought {display} for {price}g."));
             info!("Bought '{}' for {} gold", item_id, price);
         }
         ShopMode::Sell => {
             // Snapshot inventory to avoid borrow conflicts.
-            let mut snapshot: Vec<(Entity, Vec<Entity>)> = char_query
+            let mut snapshot: Vec<(Entity, usize, Vec<Entity>)> = char_query
                 .iter()
-                .map(|(e, inv)| (e, inv.0.clone()))
+                .map(|(e, slot, inv)| (e, slot.0, inv.0.clone()))
                 .collect();
-            snapshot.sort_by_key(|(e, _)| *e);
-            let Some((char_entity, item_entities)) = snapshot.into_iter().nth(shop_state.party_target) else {
+            snapshot.sort_by_key(|(_, slot, _)| *slot);
+            let Some((char_entity, _, item_entities)) = snapshot.into_iter().nth(shop_state.party_target) else {
                 return;
             };
             let Some(&item_entity) = item_entities.get(shop_state.cursor) else {
                 return;
             };
 
-            // Resolve asset for sell price.
-            let sell_price = match instances.get(item_entity) {
-                Ok(instance) => item_assets.get(&instance.0).map(|a| a.value / 2).unwrap_or(0),
+            // Resolve asset for sell price and display name.
+            let (sell_price, display_name) = match instances.get(item_entity) {
+                Ok(instance) => match item_assets.get(&instance.0) {
+                    Some(asset) => (asset.value / 2, asset.display_name.clone()),
+                    None => (0, "item".to_string()),
+                },
                 Err(_) => {
                     info!("shop sell: item entity {:?} not found", item_entity);
                     return;
@@ -470,7 +537,7 @@ pub fn handle_shop_input(
             };
 
             // Remove from inventory and despawn.
-            if let Ok((_, mut inv)) = char_query.get_mut(char_entity) {
+            if let Ok((_, _, mut inv)) = char_query.get_mut(char_entity) {
                 inv.0.retain(|&e| e != item_entity);
             }
             commands.entity(item_entity).despawn();
@@ -483,6 +550,7 @@ pub fn handle_shop_input(
             } else if new_len == 0 {
                 shop_state.cursor = 0;
             }
+            toasts.push(format!("Sold {display_name} for {sell_price}g."));
             info!("Sold item for {} gold", sell_price);
         }
     }

@@ -1,7 +1,13 @@
 // Feature #18a — Town services configuration.
-// temple_* fields are omitted (they default to 0/empty via #[serde(default)]).
-// Feature #18b reads those fields when Temple logic lands.
+// Feature #18b reads the temple_* fields below.
 (
     inn_rest_cost: 10,
     inn_rest_cures: [Poison],
+    temple_revive_cost_base: 100,
+    temple_revive_cost_per_level: 50,
+    temple_cure_costs: [
+        (Stone, 250),
+        (Paralysis, 100),
+        (Sleep, 50),
+    ],
 )

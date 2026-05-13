@@ -1,0 +1,14 @@
+feat(town): add Temple revive/cure and Guild roster screens (#18b)
+
+Replaces the #18a placeholder.rs stub with real Temple and Guild screens.
+Temple revives dead members (Dead → 1 HP, `base + per_level*level`
+saturating cost, clamped to MAX_TEMPLE_COST) and cures Stone/Paralysis/Sleep
+for flat gold (auto-pick priority Stone > Paralysis > Sleep). Guild lists
+the active party + dismissed pool, recruits from `core.recruit_pool.ron`,
+dismisses members to a `Resource<DismissedPool>` (entity preserved for #19
+re-recruit), swaps two members' PartySlot values (SWAP semantics), and
+toggles PartyRow front/back. Recruit-while-empty is allowed (forward-compat
+with #19); min-1-active check applies only to Dismiss. Zero new Cargo
+dependencies. +33 net tests vs #18a baseline.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

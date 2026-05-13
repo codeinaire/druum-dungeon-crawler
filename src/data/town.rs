@@ -33,6 +33,18 @@ pub const MAX_SHOP_ITEMS: usize = 99;
 /// Capped in `handle_inn_rest` before the gold-check.
 pub const MAX_INN_COST: u32 = 10_000;
 
+/// Maximum allowable Temple cost (revive base, revive per-level, or per-status
+/// cure) as read from `town_services.ron`. A crafted RON with `u32::MAX` would
+/// make the Temple permanently unusable; `0` would allow free revives (caught by
+/// the `.max(1)` guard in `revive_cost`). Clamped in `temple::revive_cost` and
+/// `temple::cure_cost` before any gold-check.
+pub const MAX_TEMPLE_COST: u32 = 100_000;
+
+/// Maximum number of recruits that the Guild painter iterates. Authored RON
+/// may contain more — `clamp_recruit_pool` truncates the slice at this bound so
+/// a crafted/malformed RON file cannot exhaust paint-loop memory.
+pub const MAX_RECRUIT_POOL: usize = 32;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ShopEntry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,6 +106,20 @@ impl ShopStock {
 pub fn clamp_shop_stock(stock: &ShopStock, max_items: usize) -> &[ShopEntry] {
     let len = stock.items.len().min(max_items);
     &stock.items[..len]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// clamp_recruit_pool (trust-boundary helper)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Return a bounded slice of the recruit pool, truncated to at most
+/// `max_recruits` entries. Call this in the Guild painter before iterating so
+/// that a crafted RON with a 100K-entry pool does not exhaust paint-loop memory.
+///
+/// `max_recruits` is typically [`MAX_RECRUIT_POOL`].
+pub fn clamp_recruit_pool(pool: &RecruitPool, max_recruits: usize) -> &[RecruitDef] {
+    let len = pool.recruits.len().min(max_recruits);
+    &pool.recruits[..len]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,6 +333,39 @@ mod tests {
         assert_eq!(original.recruits[0].class, parsed.recruits[0].class);
     }
 
+    // ── RecruitPool clamp ─────────────────────────────────────────────────────
+
+    /// An oversized pool (200 entries) is truncated by `clamp_recruit_pool` to
+    /// `MAX_RECRUIT_POOL` (32).
+    #[test]
+    fn recruit_pool_size_clamped_truncates_oversized() {
+        let recruits: Vec<RecruitDef> = (0..200)
+            .map(|i| RecruitDef {
+                name: format!("recruit_{i}"),
+                ..Default::default()
+            })
+            .collect();
+        let pool = RecruitPool { recruits };
+        let clamped = clamp_recruit_pool(&pool, MAX_RECRUIT_POOL);
+        assert_eq!(clamped.len(), MAX_RECRUIT_POOL);
+    }
+
+    /// A pool with fewer entries than `max_recruits` is returned in full.
+    #[test]
+    fn clamp_recruit_pool_passes_through_small_pool() {
+        let pool = RecruitPool {
+            recruits: vec![
+                RecruitDef { name: "a".into(), ..Default::default() },
+                RecruitDef { name: "b".into(), ..Default::default() },
+                RecruitDef { name: "c".into(), ..Default::default() },
+                RecruitDef { name: "d".into(), ..Default::default() },
+                RecruitDef { name: "e".into(), ..Default::default() },
+            ],
+        };
+        let clamped = clamp_recruit_pool(&pool, MAX_RECRUIT_POOL);
+        assert_eq!(clamped.len(), 5);
+    }
+
     // ── TownServices ─────────────────────────────────────────────────────────
 
     /// Round-trip `TownServices`, including defaulted temple fields omitted from RON.
@@ -337,5 +396,52 @@ mod tests {
             ron::de::from_str(&serialized).expect("re-deserialize TownServices");
         assert_eq!(parsed.inn_rest_cost, reparsed.inn_rest_cost);
         assert_eq!(parsed.inn_rest_cures, reparsed.inn_rest_cures);
+    }
+
+    /// Round-trip `TownServices` with explicitly authored temple fields.
+    /// Verifies the values survive parse and that re-serialized RON is stable.
+    #[test]
+    fn town_services_round_trips_with_authored_temple_fields() {
+        let ron_str = r#"(
+    inn_rest_cost: 10,
+    inn_rest_cures: [Poison],
+    temple_revive_cost_base: 100,
+    temple_revive_cost_per_level: 50,
+    temple_cure_costs: [
+        (Stone, 250),
+        (Paralysis, 100),
+        (Sleep, 50),
+    ],
+)"#;
+
+        let parsed: TownServices =
+            ron::de::from_str(ron_str).expect("deserialize TownServices with temple fields");
+
+        // Assert non-zero post-parse (guards against accidental default-to-0).
+        assert_eq!(parsed.temple_revive_cost_base, 100);
+        assert_eq!(parsed.temple_revive_cost_per_level, 50);
+        assert_eq!(parsed.temple_cure_costs.len(), 3);
+        assert!(
+            parsed.temple_cure_costs.contains(&(StatusEffectType::Stone, 250)),
+            "Stone cure cost should be 250"
+        );
+        assert!(
+            parsed.temple_cure_costs.contains(&(StatusEffectType::Paralysis, 100)),
+            "Paralysis cure cost should be 100"
+        );
+        assert!(
+            parsed.temple_cure_costs.contains(&(StatusEffectType::Sleep, 50)),
+            "Sleep cure cost should be 50"
+        );
+
+        // Stable round-trip: re-serialize and re-parse.
+        let serialized =
+            ron::ser::to_string_pretty(&parsed, ron::ser::PrettyConfig::default())
+                .expect("serialize TownServices with temple fields");
+        let reparsed: TownServices =
+            ron::de::from_str(&serialized).expect("re-deserialize TownServices with temple fields");
+        assert_eq!(parsed.temple_revive_cost_base, reparsed.temple_revive_cost_base);
+        assert_eq!(parsed.temple_revive_cost_per_level, reparsed.temple_revive_cost_per_level);
+        assert_eq!(parsed.temple_cure_costs, reparsed.temple_cure_costs);
     }
 }

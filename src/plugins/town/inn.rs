@@ -112,6 +112,7 @@ pub fn handle_inn_rest(
     services_assets: Res<Assets<TownServices>>,
     mut next_sub: ResMut<NextState<TownLocation>>,
     mut writer: MessageWriter<EquipmentChangedEvent>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
     mut party: Query<(Entity, &mut DerivedStats, &mut StatusEffects), With<PartyMember>>,
 ) {
     if actions.just_pressed(&MenuAction::Cancel) {
@@ -136,6 +137,7 @@ pub fn handle_inn_rest(
     // Step 2: gold sufficiency check.
     if gold.0 < cost {
         info!("Inn rest: insufficient gold (have {}, need {})", gold.0, cost);
+        toasts.push(format!("Not enough gold to rest ({cost}g needed)."));
         return;
     }
 
@@ -167,8 +169,8 @@ pub fn handle_inn_rest(
     clock.day = clock.day.saturating_add(1);
     clock.turn = 0;
 
-    // Step 6: return to Square.
-    next_sub.set(TownLocation::Square);
+    // Stay in the Inn screen — user returns to Square via Esc/Cancel.
+    toasts.push(format!("Party rested. ({cost}g) — Day {}.", clock.day));
     info!("Party rested at the Inn for {} gold. Day: {}", cost, clock.day);
 }
 
@@ -204,6 +206,7 @@ mod tests {
         // Gold, clock, menu actions.
         app.init_resource::<Gold>();
         app.init_resource::<GameClock>();
+        app.init_resource::<crate::plugins::town::toast::Toasts>();
         app.init_resource::<ActionState<MenuAction>>();
         app.insert_resource(InputMap::<MenuAction>::default());
 
@@ -448,5 +451,26 @@ mod tests {
         // Dead member HP must remain 0.
         let dead_hp = app.world().get::<DerivedStats>(dead).unwrap().current_hp;
         assert_eq!(dead_hp, 0, "Dead member HP should remain 0 after Inn rest");
+    }
+
+    /// After a successful rest, the screen stays in `TownLocation::Inn`.
+    /// Returning to Square is user-initiated via Cancel only.
+    #[test]
+    fn rest_does_not_auto_return_to_square() {
+        let mut app = make_inn_test_app();
+        app.world_mut().resource_mut::<Gold>().0 = 100;
+        let _m = spawn_party_member(&mut app, 20, 10, vec![]);
+
+        press_confirm(&mut app);
+
+        // Sanity: rest succeeded (clock advanced).
+        let clock = app.world().resource::<GameClock>();
+        assert_eq!(clock.day, 1, "rest should advance the clock");
+
+        assert_eq!(
+            *app.world().resource::<State<TownLocation>>().get(),
+            TownLocation::Inn,
+            "Inn must stay open after rest — only Cancel returns to Square"
+        );
     }
 }

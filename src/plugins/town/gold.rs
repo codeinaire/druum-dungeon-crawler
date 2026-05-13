@@ -120,6 +120,83 @@ pub fn grant_gold_on_f4(
     }
 }
 
+/// Dev-only: apply status effects to the first party member for Temple/Inn cure
+/// testing.
+///
+/// - **F1** — `Dead` (test Temple revive)
+/// - **F2** — `Poison` (test Inn cure)
+/// - **F3** — `Stone` + `Paralysis` + `Sleep` (test Temple multi-status auto-pick
+///   priority Stone > Paralysis > Sleep)
+///
+/// Fires `EquipmentChangedEvent` per affected member so derived stats
+/// recompute via the existing pipeline (mirrors the Temple/Inn handler pattern).
+#[cfg(feature = "dev")]
+pub fn apply_test_status_on_function_keys(
+    keys: Res<bevy::input::ButtonInput<bevy::prelude::KeyCode>>,
+    mut party: Query<
+        (
+            bevy::prelude::Entity,
+            &crate::plugins::party::character::PartySlot,
+            &mut crate::plugins::party::character::StatusEffects,
+        ),
+        bevy::prelude::With<crate::plugins::party::character::PartyMember>,
+    >,
+    mut writer: bevy::ecs::message::MessageWriter<
+        crate::plugins::party::inventory::EquipmentChangedEvent,
+    >,
+) {
+    use crate::plugins::party::character::{ActiveEffect, StatusEffectType};
+    use crate::plugins::party::inventory::{EquipmentChangedEvent, EquipSlot};
+
+    // Target the lowest-PartySlot member (deterministic, matches Temple cursor 0).
+    let target_entity = {
+        let mut members: Vec<(bevy::prelude::Entity, usize)> =
+            party.iter().map(|(e, slot, _)| (e, slot.0)).collect();
+        members.sort_by_key(|(_, slot)| *slot);
+        match members.first() {
+            Some(&(e, _)) => e,
+            None => return,
+        }
+    };
+
+    let Ok((entity, _slot, mut effects)) = party.get_mut(target_entity) else {
+        return;
+    };
+
+    let mut applied: Vec<StatusEffectType> = Vec::new();
+    let mut try_apply = |effects: &mut crate::plugins::party::character::StatusEffects,
+                        kind: StatusEffectType| {
+        if !effects.has(kind) {
+            effects.effects.push(ActiveEffect {
+                effect_type: kind,
+                remaining_turns: None,
+                magnitude: 0.0,
+            });
+            applied.push(kind);
+        }
+    };
+
+    if keys.just_pressed(bevy::prelude::KeyCode::F1) {
+        try_apply(&mut effects, StatusEffectType::Dead);
+    }
+    if keys.just_pressed(bevy::prelude::KeyCode::F2) {
+        try_apply(&mut effects, StatusEffectType::Poison);
+    }
+    if keys.just_pressed(bevy::prelude::KeyCode::F3) {
+        try_apply(&mut effects, StatusEffectType::Stone);
+        try_apply(&mut effects, StatusEffectType::Paralysis);
+        try_apply(&mut effects, StatusEffectType::Sleep);
+    }
+
+    if !applied.is_empty() {
+        writer.write(EquipmentChangedEvent {
+            character: entity,
+            slot: EquipSlot::None,
+        });
+        info!("DEV: applied {:?} to {:?}", applied, entity);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
