@@ -163,11 +163,15 @@ pub fn paint_guild(
 
     egui::TopBottomPanel::top("guild_header").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            let mode_label = match guild_state.mode {
+            let mode_label: &str = match guild_state.mode {
                 GuildMode::Roster => "Guild — Roster",
                 GuildMode::Recruit => "Guild — Recruit",
-                // Feature #19 creation wizard sub-modes — dedicated painters handle display.
-                _ => "Guild — Create Character",
+                GuildMode::CreateRace => "Guild — Create Character — Step 1 of 6: Race",
+                GuildMode::CreateClass => "Guild — Create Character — Step 2 of 6: Class",
+                GuildMode::CreateRoll => "Guild — Create Character — Step 3 of 6: Roll Bonus",
+                GuildMode::CreateAllocate => "Guild — Create Character — Step 4 of 6: Allocate",
+                GuildMode::CreateName => "Guild — Create Character — Step 5 of 6: Name",
+                GuildMode::CreateConfirm => "Guild — Create Character — Step 6 of 6: Confirm",
             };
             ui.heading(mode_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -292,7 +296,20 @@ pub fn handle_guild_input(
     town_assets: Option<Res<TownAssets>>,
     pool_assets: Res<Assets<RecruitPool>>,
 ) {
-    if actions.just_pressed(&MenuAction::Cancel) {
+    // Cancel — leave Guild → Town Square. Suppressed in creation sub-modes:
+    // `handle_guild_create_input` owns Cancel there (one step back, not all
+    // the way out to Town).
+    if actions.just_pressed(&MenuAction::Cancel)
+        && !matches!(
+            guild_state.mode,
+            GuildMode::CreateRace
+                | GuildMode::CreateClass
+                | GuildMode::CreateRoll
+                | GuildMode::CreateAllocate
+                | GuildMode::CreateName
+                | GuildMode::CreateConfirm
+        )
+    {
         next_sub.set(TownLocation::Square);
         return;
     }

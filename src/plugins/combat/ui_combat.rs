@@ -29,8 +29,9 @@ use crate::plugins::combat::enemy::{Enemy, EnemyName};
 use crate::plugins::combat::status_effects::is_silenced;
 use crate::plugins::combat::targeting::TargetSelection;
 use crate::plugins::combat::turn_manager::{
-    MenuFrame, PendingAction, PlayerInputState, TurnActionQueue,
+    MenuFrame, PendingAction, PendingVictoryResult, PlayerInputState, TurnActionQueue,
 };
+use crate::plugins::party::character::Experience;
 use crate::plugins::dungeon::DungeonCamera;
 use crate::plugins::input::CombatAction as MenuNavAction;
 use crate::plugins::party::character::{
@@ -51,9 +52,63 @@ impl Plugin for CombatUiPlugin {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            paint_combat_screen.run_if(in_state(GameState::Combat)),
+            (
+                paint_combat_screen.run_if(in_state(GameState::Combat)),
+                paint_combat_victory_screen.run_if(in_state(CombatPhase::Victory)),
+            ),
         );
     }
+}
+
+/// Paint the victory results overlay shown during `CombatPhase::Victory`.
+///
+/// Renders an `egui::Window` (modal-style, anchored center) over the combat
+/// scene so the player can read what they earned before pressing Confirm.
+/// Dismissal is handled by `handle_combat_victory_input`.
+fn paint_combat_victory_screen(
+    mut contexts: EguiContexts,
+    pending: Res<PendingVictoryResult>,
+    log: Res<CombatLog>,
+    party: Query<(&CharacterName, &Experience, &DerivedStats), With<PartyMember>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::Window::new("Victory!")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.label(format!("Total XP earned: {}", pending.total_xp));
+            if pending.total_gold > 0 {
+                ui.label(format!("Total gold earned: {}", pending.total_gold));
+            }
+            ui.add_space(8.0);
+
+            ui.heading("Party");
+            for (name, exp, derived) in &party {
+                ui.label(format!(
+                    "{} — Lv{} HP {}/{} XP {}/{}",
+                    name.0,
+                    exp.level,
+                    derived.current_hp,
+                    derived.max_hp,
+                    exp.current_xp,
+                    exp.xp_to_next_level,
+                ));
+            }
+            ui.add_space(8.0);
+
+            ui.heading("Last actions");
+            for entry in log.entries.iter().rev().take(8).collect::<Vec<_>>().iter().rev() {
+                ui.label(format!("[T{}] {}", entry.turn_number, entry.message));
+            }
+            ui.add_space(8.0);
+
+            ui.separator();
+            ui.label("[Enter] Return to dungeon");
+        });
+
+    Ok(())
 }
 
 /// Attach `PrimaryEguiContext` to the dungeon camera. Idempotent

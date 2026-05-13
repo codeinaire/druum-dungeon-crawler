@@ -33,6 +33,10 @@ pub enum CombatPhase {
     ExecuteActions,
     EnemyTurn,
     TurnResult,
+    /// All enemies defeated. Combat is paused on this phase showing the
+    /// results screen (XP earned, party HP/level, log) until the player
+    /// presses Confirm. Transitions out to `GameState::Dungeon`.
+    Victory,
 }
 
 #[derive(SubStates, Default, Debug, Clone, PartialEq, Eq, Hash)]

@@ -220,6 +220,17 @@ pub fn paint_guild_create_class(
                     })
                     .collect();
 
+                // Authored classes the current race can't take — listed below
+                // the cursor-navigable visible list so the rule is discoverable.
+                let restricted: Vec<&crate::data::ClassDef> = ALL_CLASSES
+                    .iter()
+                    .filter_map(|&c| class_table.get(c))
+                    .filter(|def| {
+                        !def.allowed_races.is_empty()
+                            && !def.allowed_races.contains(&chosen_race)
+                    })
+                    .collect();
+
                 let total_rows = visible.len();
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -243,6 +254,17 @@ pub fn paint_guild_create_class(
                             ));
                         }
                     });
+
+                if !restricted.is_empty() {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    let names: Vec<&str> =
+                        restricted.iter().map(|d| d.display_name.as_str()).collect();
+                    ui.label(format!(
+                        "Restricted for {chosen_race:?}: {} (pick a different race to access)",
+                        names.join(", ")
+                    ));
+                }
             }
         }
 
@@ -479,15 +501,17 @@ pub fn handle_guild_create_input(
         _ => return,
     }
 
-    // Cancel — reset draft and return to Roster.
+    // Cancel — exit creation flow. In CreateConfirm, Esc steps back to Name
+    // (the previous step) rather than dropping the whole draft. From any
+    // other creation step, Esc resets the draft and returns to the Recruit
+    // screen (where the user entered creation from via `]`).
     if actions.just_pressed(&MenuAction::Cancel) {
-        // In CreateConfirm, Esc goes back to Allocate (not all the way to Roster).
         if guild_state.mode == GuildMode::CreateConfirm {
-            guild_state.mode = GuildMode::CreateAllocate;
+            guild_state.mode = GuildMode::CreateName;
             return;
         }
         draft.reset();
-        guild_state.mode = GuildMode::Roster;
+        guild_state.mode = GuildMode::Recruit;
         guild_state.cursor = 0;
         return;
     }
@@ -582,17 +606,10 @@ pub fn handle_guild_create_input(
                 // Tables not loaded — stay in Allocate.
             }
 
-            GuildMode::CreateName => {
-                let trimmed = draft.name.trim().to_string();
-                if trimmed.is_empty() {
-                    toasts.push("Name cannot be empty.");
-                } else if draft.name.len() > MAX_NAME_LEN {
-                    toasts.push(format!("Name too long (max {MAX_NAME_LEN} characters)."));
-                } else {
-                    guild_state.mode = GuildMode::CreateConfirm;
-                    guild_state.cursor = 0;
-                }
-            }
+            // CreateName advance is handled by `handle_guild_create_name_input`
+            // on Key::Enter — NOT on MenuAction::Confirm. Space is also bound
+            // to Confirm but must remain typeable as a character on this step.
+            GuildMode::CreateName => {}
 
             // CreateConfirm is handled by handle_guild_create_confirm.
             GuildMode::CreateConfirm => {}
@@ -642,9 +659,15 @@ pub fn handle_guild_create_allocate(
 ///
 /// Reads `KeyboardInput` messages directly (NOT leafwing — character keys aren't mapped).
 /// Appends printable ASCII alphanumeric + space; handles Backspace.
+///
+/// Enter advances to `CreateConfirm`. We handle this here (not in
+/// `handle_guild_create_input`) because Space is bound to
+/// `MenuAction::Confirm` too — if the umbrella handler advanced on Confirm,
+/// every Space-press would skip the name step.
 pub fn handle_guild_create_name_input(
-    guild_state: Res<GuildState>,
+    mut guild_state: ResMut<GuildState>,
     mut draft: ResMut<CreationDraft>,
+    mut toasts: ResMut<Toasts>,
     mut events: MessageReader<KeyboardInput>,
 ) {
     if guild_state.mode != GuildMode::CreateName {
@@ -664,6 +687,17 @@ pub fn handle_guild_create_name_input(
             }
             Key::Backspace => {
                 draft.name.pop();
+            }
+            Key::Enter => {
+                let trimmed = draft.name.trim().to_string();
+                if trimmed.is_empty() {
+                    toasts.push("Name cannot be empty.");
+                } else if draft.name.len() > MAX_NAME_LEN {
+                    toasts.push(format!("Name too long (max {MAX_NAME_LEN} characters)."));
+                } else {
+                    guild_state.mode = GuildMode::CreateConfirm;
+                    guild_state.cursor = 0;
+                }
             }
             _ => {}
         }
@@ -703,8 +737,14 @@ pub fn handle_guild_create_roll(
 /// Defense-in-depth re-validates eligibility, then pushes a new `RecruitDef`
 /// into `Assets<RecruitPool>`, auto-switches to `GuildMode::Recruit` with
 /// cursor on the new entry, and resets the draft.
+///
+/// **Entry-frame arming:** `Local<bool>` skips the first frame after entering
+/// `CreateConfirm`. The Enter press that advanced from `CreateName` also
+/// satisfies `just_pressed(Confirm)` in the same frame — without this guard
+/// the user never gets to see the confirm screen.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_guild_create_confirm(
+    mut armed: Local<bool>,
     mut guild_state: ResMut<GuildState>,
     mut draft: ResMut<CreationDraft>,
     actions: Res<ActionState<MenuAction>>,
@@ -715,6 +755,11 @@ pub fn handle_guild_create_confirm(
     mut pool_assets: ResMut<Assets<RecruitPool>>,
 ) {
     if guild_state.mode != GuildMode::CreateConfirm {
+        *armed = false;
+        return;
+    }
+    if !*armed {
+        *armed = true;
         return;
     }
     if !actions.just_pressed(&MenuAction::Confirm) {
@@ -1065,6 +1110,11 @@ mod tests {
     fn set_draft_to_confirm_ready(app: &mut App, draft: CreationDraft) {
         *app.world_mut().resource_mut::<CreationDraft>() = draft;
         app.world_mut().resource_mut::<GuildState>().mode = GuildMode::CreateConfirm;
+        // Run one frame in CreateConfirm so handle_guild_create_confirm's
+        // entry-frame-arming `Local<bool>` flips to true. Without this, the
+        // first press_confirm() call just arms the local and never runs the
+        // confirm logic. See doc on `handle_guild_create_confirm`.
+        app.update();
     }
 
     /// Drive the draft to CreateConfirm with valid Human/Fighter, press Enter,
