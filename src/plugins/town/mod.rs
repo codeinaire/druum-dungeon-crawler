@@ -33,19 +33,21 @@ pub mod inn;
 pub mod shop;
 pub mod square;
 pub mod temple;
+pub mod toast;
 
 pub use gold::{GameClock, Gold, SpendError};
 
 use crate::plugins::state::{GameState, TownLocation};
 
 use guild::{
-    DismissedPool, GuildState,
+    DismissedPool, GuildState, RecruitedSet,
     handle_guild_dismiss, handle_guild_input, handle_guild_recruit,
     handle_guild_row_swap, handle_guild_slot_swap, paint_guild,
 };
 use inn::{InnState, handle_inn_rest, paint_inn};
 use shop::{ShopState, handle_shop_input, paint_shop};
 use temple::{TempleState, handle_temple_action, paint_temple};
+use toast::{Toasts, paint_toasts, tick_toasts};
 use square::{SquareMenuState, handle_square_input, paint_town_square};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,7 +100,9 @@ impl Plugin for TownPlugin {
             .init_resource::<InnState>()
             .init_resource::<TempleState>()
             .init_resource::<GuildState>()
-            .init_resource::<DismissedPool>();
+            .init_resource::<DismissedPool>()
+            .init_resource::<RecruitedSet>()
+            .init_resource::<Toasts>();
 
         // Camera lifecycle.
         app.add_systems(OnEnter(GameState::Town), spawn_town_camera)
@@ -121,6 +125,13 @@ impl Plugin for TownPlugin {
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
+
+        // Toast overlay — always painted while in Town, regardless of sub-state.
+        app.add_systems(
+            EguiPrimaryContextPass,
+            paint_toasts.run_if(in_state(GameState::Town)),
+        );
+        app.add_systems(Update, tick_toasts.run_if(in_state(GameState::Town)));
 
         // Input handlers — all in Update, defense-in-depth gated on Town.
         app.add_systems(
@@ -149,7 +160,13 @@ impl Plugin for TownPlugin {
         );
 
         #[cfg(feature = "dev")]
-        app.add_systems(Update, gold::grant_gold_on_f4);
+        app.add_systems(
+            Update,
+            (
+                gold::grant_gold_on_f4,
+                gold::apply_test_status_on_function_keys,
+            ),
+        );
     }
 }
 
@@ -238,6 +255,8 @@ mod tests {
             .init_resource::<TempleState>()
             .init_resource::<GuildState>()
             .init_resource::<DismissedPool>()
+            .init_resource::<RecruitedSet>()
+            .init_resource::<crate::plugins::town::toast::Toasts>()
             .init_resource::<Gold>()
             .init_resource::<GameClock>()
             .init_resource::<PartySize>();

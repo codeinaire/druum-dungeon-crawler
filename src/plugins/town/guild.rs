@@ -77,6 +77,17 @@ pub struct DismissedPool {
     pub entities: Vec<Entity>,
 }
 
+/// Pool indices that have already been recruited. Prevents the same `RecruitDef`
+/// from being recruited twice in a single play session.
+///
+/// **Feature #23 save/load contract:** mirrors `DismissedPool` — `HashSet<usize>`
+/// is straightforward to serialize, but the actual save format is owned by #23.
+/// Doc-comment only here; no `Serialize`/`Deserialize` derives in #18b.
+#[derive(Resource, Default, Debug)]
+pub struct RecruitedSet {
+    pub indices: std::collections::HashSet<usize>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GuildState resource
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,6 +139,7 @@ pub fn paint_guild(
     gold: Res<Gold>,
     guild_state: Res<GuildState>,
     clock: Res<GameClock>,
+    recruited: Res<RecruitedSet>,
     town_assets: Option<Res<TownAssets>>,
     pool_assets: Res<Assets<RecruitPool>>,
     party: Query<(Entity, &CharacterName, &Race, &Class, &Experience, &PartySlot, &PartyRow, &StatusEffects), With<PartyMember>>,
@@ -136,7 +148,11 @@ pub fn paint_guild(
 
     egui::TopBottomPanel::top("guild_header").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            ui.heading("Guild");
+            let mode_label = match guild_state.mode {
+                GuildMode::Roster => "Guild — Roster",
+                GuildMode::Recruit => "Guild — Recruit",
+            };
+            ui.heading(mode_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(format!("{} Gold  |  Day {}", gold.0, clock.day));
             });
@@ -178,7 +194,7 @@ pub fn paint_guild(
                 }
 
                 ui.add_space(8.0);
-                ui.label("[Up/Down] Pick  |  [D] Dismiss  |  [F] Toggle Row  |  [S] Slot Swap target  |  [R] Recruit mode  |  [Esc] Back");
+                ui.label("[Up/Down] Pick  |  [G] Dismiss  |  [F] Toggle Row  |  [T] Slot Swap target  |  [R] Recruit mode  |  [Esc] Back");
             }
             GuildMode::Recruit => {
                 let recruit_pool = town_assets
@@ -197,8 +213,10 @@ pub fn paint_guild(
                             for (idx, recruit) in recruits.iter().enumerate() {
                                 let cursor_marker =
                                     if idx == guild_state.cursor { "> " } else { "  " };
+                                let taken_marker =
+                                    if recruited.indices.contains(&idx) { "  (recruited)" } else { "" };
                                 ui.label(format!(
-                                    "{}{} — {:?} {:?}  STR:{} INT:{} PIE:{} VIT:{} AGL:{} LCK:{}",
+                                    "{}{} — {:?} {:?}  STR:{} INT:{} PIE:{} VIT:{} AGL:{} LCK:{}{}",
                                     cursor_marker,
                                     recruit.name,
                                     recruit.race,
@@ -209,6 +227,7 @@ pub fn paint_guild(
                                     recruit.base_stats.vitality,
                                     recruit.base_stats.agility,
                                     recruit.base_stats.luck,
+                                    taken_marker,
                                 ));
                             }
                         }
@@ -231,9 +250,9 @@ pub fn paint_guild(
 /// Top-level navigation handler for the Guild screen.
 ///
 /// Handles Cancel (→ Square), Up/Down (cursor), and R (toggle Roster/Recruit mode).
+#[allow(clippy::too_many_arguments)]
 pub fn handle_guild_input(
     actions: Res<ActionState<MenuAction>>,
-    keys: Res<ButtonInput<KeyCode>>,
     mut guild_state: ResMut<GuildState>,
     mut next_sub: ResMut<NextState<TownLocation>>,
     party: Query<(), With<PartyMember>>,
@@ -245,8 +264,8 @@ pub fn handle_guild_input(
         return;
     }
 
-    // R key toggles between Roster and Recruit mode.
-    if keys.just_pressed(KeyCode::KeyR) {
+    // R toggles between Roster and Recruit mode (MenuAction::Recruit, KeyR).
+    if actions.just_pressed(&MenuAction::Recruit) {
         guild_state.mode = match guild_state.mode {
             GuildMode::Roster => GuildMode::Recruit,
             GuildMode::Recruit => GuildMode::Roster,
@@ -284,10 +303,13 @@ pub fn handle_guild_input(
 /// Gated on `GuildMode::Recruit`. Spawns a fresh `PartyMemberBundle` +
 /// `Inventory::default()`. No minimum-active check on Recruit (forward-compat
 /// with #19 Character Creation where the active roster may start empty).
+#[allow(clippy::too_many_arguments)]
 pub fn handle_guild_recruit(
     mut commands: Commands,
     actions: Res<ActionState<MenuAction>>,
     mut guild_state: ResMut<GuildState>,
+    mut recruited: ResMut<RecruitedSet>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
     party_size: Res<PartySize>,
     existing_slots: Query<&PartySlot, With<PartyMember>>,
     town_assets: Option<Res<TownAssets>>,
@@ -313,10 +335,18 @@ pub fn handle_guild_recruit(
         return;
     };
 
+    // Dedup guard — each pool index can be recruited at most once per session.
+    if recruited.indices.contains(&guild_state.cursor) {
+        info!("Guild recruit: '{}' (pool index {}) already recruited", recruit.name, guild_state.cursor);
+        toasts.push(format!("{} is already in your party.", recruit.name));
+        return;
+    }
+
     // Party-full guard.
     let current_count = existing_slots.iter().count();
     if current_count >= party_size.0 {
         info!("Guild recruit: party full ({}/{})", current_count, party_size.0);
+        toasts.push(format!("Party is full ({}/{}).", current_count, party_size.0));
         return;
     }
 
@@ -345,9 +375,14 @@ pub fn handle_guild_recruit(
         })
         .insert(Inventory::default());
 
+    // Mark this pool index as taken so the painter can show "(recruited)" and
+    // the handler rejects a duplicate press.
+    recruited.indices.insert(guild_state.cursor);
+
     // Jump back to roster after recruiting.
     guild_state.mode = GuildMode::Roster;
 
+    toasts.push(format!("{} has joined your party!", recruit.name));
     info!(
         "Guild: recruited '{}' ({:?} {:?}) into slot {}",
         recruit.name, recruit.race, recruit.class, slot
@@ -374,27 +409,29 @@ pub fn handle_guild_dismiss(
     mut commands: Commands,
     mut pool: ResMut<DismissedPool>,
     guild_state: Res<GuildState>,
-    party: Query<(Entity, &PartySlot), With<PartyMember>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    party: Query<(Entity, &PartySlot, &CharacterName), With<PartyMember>>,
+    actions: Res<ActionState<MenuAction>>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
 ) {
     if guild_state.mode != GuildMode::Roster {
         return;
     }
-    if !keys.just_pressed(KeyCode::KeyD) {
+    if !actions.just_pressed(&MenuAction::Dismiss) {
         return;
     }
 
     let active_count = party.iter().count();
     if active_count <= 1 {
         info!("Guild dismiss: cannot dismiss the last active member");
+        toasts.push("Cannot dismiss the last party member.");
         return;
     }
 
     // Sort by (PartySlot, Entity) — same order as the painter.
-    let mut members: Vec<(Entity, &PartySlot)> = party.iter().collect();
-    members.sort_by_key(|(e, slot)| (slot.0, *e));
+    let mut members: Vec<(Entity, &PartySlot, &CharacterName)> = party.iter().collect();
+    members.sort_by_key(|(e, slot, _)| (slot.0, *e));
 
-    let Some(&(target, _)) = members.get(guild_state.cursor) else {
+    let Some(&(target, _, name)) = members.get(guild_state.cursor) else {
         info!(
             "Guild dismiss: cursor {} out of range (party len {})",
             guild_state.cursor,
@@ -402,10 +439,12 @@ pub fn handle_guild_dismiss(
         );
         return;
     };
+    let name_str = name.0.clone();
 
     // Remove PartyMember marker (deferred). Do NOT despawn — preserves Inventory chain.
     commands.entity(target).remove::<PartyMember>();
     pool.entities.push(target);
+    toasts.push(format!("Dismissed {name_str}."));
     info!("Guild: dismissed {:?}", target);
 }
 
@@ -418,19 +457,20 @@ pub fn handle_guild_dismiss(
 /// Gated on `GuildMode::Roster`. Front → Back, Back → Front.
 pub fn handle_guild_row_swap(
     guild_state: Res<GuildState>,
-    mut party: Query<(Entity, &PartySlot, &mut PartyRow), With<PartyMember>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut party: Query<(Entity, &PartySlot, &CharacterName, &mut PartyRow), With<PartyMember>>,
+    actions: Res<ActionState<MenuAction>>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
 ) {
     if guild_state.mode != GuildMode::Roster {
         return;
     }
-    if !keys.just_pressed(KeyCode::KeyF) {
+    if !actions.just_pressed(&MenuAction::RowSwap) {
         return;
     }
 
     let mut members: Vec<(Entity, usize)> = party
         .iter()
-        .map(|(e, slot, _)| (e, slot.0))
+        .map(|(e, slot, _, _)| (e, slot.0))
         .collect();
     members.sort_by_key(|(e, slot)| (*slot, *e));
 
@@ -438,11 +478,12 @@ pub fn handle_guild_row_swap(
         return;
     };
 
-    if let Ok((_, _, mut row)) = party.get_mut(target) {
+    if let Ok((_, _, name, mut row)) = party.get_mut(target) {
         *row = match *row {
             PartyRow::Front => PartyRow::Back,
             PartyRow::Back => PartyRow::Front,
         };
+        toasts.push(format!("{} moved to {:?} row.", name.0, *row));
         info!("Guild: toggled row for {:?} → {:?}", target, *row);
     }
 }
@@ -461,13 +502,15 @@ pub fn handle_guild_row_swap(
 pub fn handle_guild_slot_swap(
     guild_state: Res<GuildState>,
     mut party: Query<(Entity, &mut PartySlot), With<PartyMember>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    name_query: Query<&CharacterName, With<PartyMember>>,
+    actions: Res<ActionState<MenuAction>>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
     mut pin: Local<Option<Entity>>,
 ) {
     if guild_state.mode != GuildMode::Roster {
         return;
     }
-    if !keys.just_pressed(KeyCode::KeyS) {
+    if !actions.just_pressed(&MenuAction::SlotSwap) {
         return;
     }
 
@@ -486,6 +529,8 @@ pub fn handle_guild_slot_swap(
         None => {
             // First press — pin the source.
             *pin = Some(cursor_entity);
+            let name = name_query.get(cursor_entity).map(|n| n.0.clone()).unwrap_or_else(|_| "?".into());
+            toasts.push(format!("Slot swap: pinned {name} — press T on another member."));
             info!("Guild slot-swap: pinned source {:?}", cursor_entity);
         }
         Some(source) => {
@@ -494,6 +539,7 @@ pub fn handle_guild_slot_swap(
 
             if source == cursor_entity {
                 // Same entity — no-op.
+                toasts.push("Slot swap: cancelled (same member).");
                 info!("Guild slot-swap: source and target are the same, cancelling");
                 return;
             }
@@ -507,6 +553,9 @@ pub fn handle_guild_slot_swap(
                 return;
             };
 
+            let name_a = name_query.get(source).map(|n| n.0.clone()).unwrap_or_else(|_| "?".into());
+            let name_b = name_query.get(cursor_entity).map(|n| n.0.clone()).unwrap_or_else(|_| "?".into());
+
             // Write the swapped values.
             if let Ok((_, mut slot)) = party.get_mut(source) {
                 slot.0 = t;
@@ -515,6 +564,7 @@ pub fn handle_guild_slot_swap(
                 slot.0 = s;
             }
 
+            toasts.push(format!("Swapped {name_a} ↔ {name_b}."));
             info!(
                 "Guild slot-swap: exchanged slots {:?}({}) ↔ {:?}({})",
                 source, s, cursor_entity, t
@@ -610,6 +660,8 @@ mod tests {
         app.init_resource::<GameClock>();
         app.init_resource::<GuildState>();
         app.init_resource::<DismissedPool>();
+        app.init_resource::<RecruitedSet>();
+        app.init_resource::<crate::plugins::town::toast::Toasts>();
         app.init_resource::<PartySize>();
         app.init_resource::<ActionState<MenuAction>>();
         app.insert_resource(InputMap::<MenuAction>::default());
@@ -734,39 +786,34 @@ mod tests {
 
     fn press_key_d(app: &mut App) {
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyD);
+            .resource_mut::<ActionState<MenuAction>>()
+            .press(&MenuAction::Dismiss);
         app.update();
-        // Clear just_pressed state manually (InputPlugin not present in MinimalPlugins).
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .clear();
+            .resource_mut::<ActionState<MenuAction>>()
+            .release(&MenuAction::Dismiss);
         app.update();
     }
 
     fn press_key_f(app: &mut App) {
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyF);
+            .resource_mut::<ActionState<MenuAction>>()
+            .press(&MenuAction::RowSwap);
         app.update();
-        {
-            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            input.release(KeyCode::KeyF);
-            input.clear();
-        }
+        app.world_mut()
+            .resource_mut::<ActionState<MenuAction>>()
+            .release(&MenuAction::RowSwap);
         app.update();
     }
 
     fn press_key_s(app: &mut App) {
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyS);
+            .resource_mut::<ActionState<MenuAction>>()
+            .press(&MenuAction::SlotSwap);
         app.update();
-        {
-            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            input.release(KeyCode::KeyS);
-            input.clear();
-        }
+        app.world_mut()
+            .resource_mut::<ActionState<MenuAction>>()
+            .release(&MenuAction::SlotSwap);
         app.update();
     }
 

@@ -64,6 +64,17 @@ pub enum MenuAction {
     Confirm,
     Cancel,
     Pause,
+    // Town/Guild verbs (Feature #18b). Bound to non-WASD keys to avoid clashing
+    // with Up/Down/Left/Right. Read via egui-safe leafwing pipeline, not the
+    // raw `ButtonInput<KeyCode>` that bevy_egui consumes for alphanumeric keys.
+    Recruit,
+    Dismiss,
+    RowSwap,
+    SlotSwap,
+    // Party-target cycling for Shop/Temple (Feature #18b polish). Lets the user
+    // pick which member buys/sells/is acted-on. Bound to `[` and `]`.
+    PrevTarget,
+    NextTarget,
 }
 
 /// First-person grid movement and dungeon UI hotkeys. Used in
@@ -152,24 +163,53 @@ impl Plugin for ActionsPlugin {
 fn apply_logical_key_bindings(
     mut events: MessageReader<KeyboardInput>,
     mut dungeon: ResMut<ActionState<DungeonAction>>,
+    mut menu: ResMut<ActionState<MenuAction>>,
 ) {
     for event in events.read() {
         let Key::Character(text) = &event.logical_key else {
             continue;
         };
         let pressed = event.state == ButtonState::Pressed;
-        // Match the LETTERS bound in default_dungeon_input_map below.
-        // Special keys (arrows, Tab, Escape) come through as `Key::ArrowUp` etc.,
+        // Match the LETTERS bound in default_dungeon_input_map / default_menu_input_map.
+        // Special keys (arrows, Enter, Escape) come through as `Key::ArrowUp` etc.,
         // not `Key::Character`, so the existing physical bindings handle those.
+        //
+        // DungeonAction and MenuAction can share the same letter (e.g. "f" → both
+        // Interact and RowSwap). Both presses fire, but consumers are state-gated
+        // (Dungeon vs Town/Guild) so only one consumer reacts per press.
         match text.as_str().to_ascii_lowercase().as_str() {
-            "f" => press_or_release(&mut dungeon, DungeonAction::Interact, pressed),
+            // Dungeon letters
             "m" => press_or_release(&mut dungeon, DungeonAction::OpenMap, pressed),
-            "w" => press_or_release(&mut dungeon, DungeonAction::MoveForward, pressed),
-            "a" => press_or_release(&mut dungeon, DungeonAction::StrafeLeft, pressed),
-            "s" => press_or_release(&mut dungeon, DungeonAction::MoveBackward, pressed),
-            "d" => press_or_release(&mut dungeon, DungeonAction::StrafeRight, pressed),
             "q" => press_or_release(&mut dungeon, DungeonAction::TurnLeft, pressed),
             "e" => press_or_release(&mut dungeon, DungeonAction::TurnRight, pressed),
+            // Menu cursor letters (WASD mirrors of Up/Down/Left/Right)
+            "w" => {
+                press_or_release(&mut dungeon, DungeonAction::MoveForward, pressed);
+                press_or_release(&mut menu, MenuAction::Up, pressed);
+            }
+            "a" => {
+                press_or_release(&mut dungeon, DungeonAction::StrafeLeft, pressed);
+                press_or_release(&mut menu, MenuAction::Left, pressed);
+            }
+            "s" => {
+                press_or_release(&mut dungeon, DungeonAction::MoveBackward, pressed);
+                press_or_release(&mut menu, MenuAction::Down, pressed);
+            }
+            "d" => {
+                press_or_release(&mut dungeon, DungeonAction::StrafeRight, pressed);
+                press_or_release(&mut menu, MenuAction::Right, pressed);
+            }
+            // Menu verb letters (Town hub)
+            "f" => {
+                press_or_release(&mut dungeon, DungeonAction::Interact, pressed);
+                press_or_release(&mut menu, MenuAction::RowSwap, pressed);
+            }
+            "r" => press_or_release(&mut menu, MenuAction::Recruit, pressed),
+            "g" => press_or_release(&mut menu, MenuAction::Dismiss, pressed),
+            "t" => press_or_release(&mut menu, MenuAction::SlotSwap, pressed),
+            // Bracket characters for party-target cycling.
+            "[" => press_or_release(&mut menu, MenuAction::PrevTarget, pressed),
+            "]" => press_or_release(&mut menu, MenuAction::NextTarget, pressed),
             _ => {}
         }
     }
@@ -198,6 +238,14 @@ fn default_menu_input_map() -> InputMap<MenuAction> {
         .with(Confirm, KeyCode::Space)
         .with(Cancel, KeyCode::Escape)
         .with(Pause, KeyCode::Escape)
+        // Guild verbs (#18b). Non-conflicting keys (avoid WASD which maps to Up/Down/Left/Right).
+        .with(Recruit, KeyCode::KeyR)
+        .with(Dismiss, KeyCode::KeyG)
+        .with(RowSwap, KeyCode::KeyF)
+        .with(SlotSwap, KeyCode::KeyT)
+        // Party-target cycling (Shop, Temple — pick which member acts).
+        .with(PrevTarget, KeyCode::BracketLeft)
+        .with(NextTarget, KeyCode::BracketRight)
 }
 
 fn default_dungeon_input_map() -> InputMap<DungeonAction> {

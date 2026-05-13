@@ -46,7 +46,7 @@ use crate::data::town::{MAX_TEMPLE_COST, TownServices};
 use crate::plugins::input::MenuAction;
 use crate::plugins::loading::TownAssets;
 use crate::plugins::party::character::{
-    DerivedStats, Experience, PartyMember, StatusEffectType, StatusEffects,
+    CharacterName, DerivedStats, Experience, PartyMember, PartySlot, StatusEffectType, StatusEffects,
 };
 use crate::plugins::party::inventory::{EquipSlot, EquipmentChangedEvent};
 use crate::plugins::state::TownLocation;
@@ -141,13 +141,17 @@ pub fn first_curable_status(
 ///
 /// **Read-only** — no `ResMut<T>` or `Commands`. All mutations live in
 /// `handle_temple_action`.
+#[allow(clippy::type_complexity)]
 pub fn paint_temple(
     mut contexts: EguiContexts,
     gold: Res<Gold>,
     temple_state: Res<TempleState>,
     town_assets: Option<Res<TownAssets>>,
     services_assets: Res<Assets<TownServices>>,
-    party: Query<(Entity, &StatusEffects, &Experience), With<PartyMember>>,
+    party: Query<
+        (Entity, &CharacterName, &PartySlot, &StatusEffects, &Experience, &DerivedStats),
+        With<PartyMember>,
+    >,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -165,33 +169,66 @@ pub fn paint_temple(
             .as_ref()
             .and_then(|a| services_assets.get(&a.services));
 
-        // Sorted party list for deterministic cursor alignment.
-        let mut members: Vec<(Entity, &StatusEffects, &Experience)> = party.iter().collect();
-        members.sort_by_key(|(e, _, _)| *e);
+        // Sort by PartySlot for deterministic cursor alignment with the rest of
+        // the codebase (Guild, Shop, dev hotkeys all key off PartySlot).
+        let mut members: Vec<(Entity, &CharacterName, &PartySlot, &StatusEffects, &Experience, &DerivedStats)> =
+            party.iter().collect();
+        members.sort_by_key(|(_, _, slot, _, _, _)| slot.0);
 
         let mode_label = match temple_state.mode {
             TempleMode::Revive => "Revive",
             TempleMode::Cure => "Cure",
         };
         ui.label(format!("Mode: {mode_label}"));
-        ui.add_space(8.0);
+        ui.add_space(4.0);
 
         if members.is_empty() {
             ui.label("(No active party members)");
         } else {
             let idx = temple_state.party_target.min(members.len().saturating_sub(1));
-            let (_, status, xp) = members[idx];
 
+            // Full party roster with cursor marker + status icons.
+            ui.label("Party:");
+            for (i, (_, name, slot, status, xp, derived)) in members.iter().enumerate() {
+                let cursor_marker = if i == idx { "> " } else { "  " };
+                let dead = if status.has(StatusEffectType::Dead) { " [DEAD]" } else { "" };
+                let stone = if status.has(StatusEffectType::Stone) { " [STONE]" } else { "" };
+                let paralyzed = if status.has(StatusEffectType::Paralysis) { " [PARALYSIS]" } else { "" };
+                let asleep = if status.has(StatusEffectType::Sleep) { " [SLEEP]" } else { "" };
+                let poison = if status.has(StatusEffectType::Poison) { " [POISON]" } else { "" };
+                let line = format!(
+                    "{}slot {} — {} (lvl {})  HP:{}/{}{}{}{}{}{}",
+                    cursor_marker,
+                    slot.0,
+                    name.0,
+                    xp.level,
+                    derived.current_hp,
+                    derived.max_hp,
+                    dead, stone, paralyzed, asleep, poison,
+                );
+                if i == idx {
+                    ui.colored_label(egui::Color32::YELLOW, line);
+                } else {
+                    ui.label(line);
+                }
+            }
+            ui.add_space(8.0);
+
+            let (_, _, _, status, xp, _) = members[idx];
             let action_label = if let Some(svc) = services {
                 match temple_state.mode {
                     TempleMode::Revive => {
                         let cost = revive_cost(svc, xp.level);
-                        format!("Revive party member (lvl {}): {}g", xp.level, cost)
+                        if status.has(StatusEffectType::Dead) {
+                            format!("Revive (lvl {}): {}g", xp.level, cost)
+                        } else {
+                            "(target is alive — Revive does nothing)".to_string()
+                        }
                     }
                     TempleMode::Cure => {
                         match first_curable_status(svc, status) {
                             Some((kind, cost)) => format!("Cure {:?}: {}g", kind, cost),
-                            None => "Nothing to cure".to_string(),
+                            None => "(no curable status)".to_string(),
                         }
                     }
                 }
@@ -203,7 +240,7 @@ pub fn paint_temple(
         }
 
         ui.add_space(16.0);
-        ui.label("[Tab/Left/Right] Switch mode  |  [Up/Down] Pick member  |  [Enter] Confirm  |  [Esc] Back");
+        ui.label("[Left/Right] Switch mode  |  [Up/Down] Pick member  |  [Enter] Confirm  |  [Esc] Back");
     });
 
     Ok(())
@@ -226,6 +263,7 @@ pub fn paint_temple(
 /// 3. `writer.write(EquipmentChangedEvent { slot: EquipSlot::None })`.
 /// 4. `gold.try_spend(cost)`.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn handle_temple_action(
     actions: Res<ActionState<MenuAction>>,
     mut gold: ResMut<Gold>,
@@ -234,7 +272,8 @@ pub fn handle_temple_action(
     services_assets: Res<Assets<TownServices>>,
     mut next_sub: ResMut<NextState<TownLocation>>,
     mut writer: MessageWriter<EquipmentChangedEvent>,
-    mut party: Query<(Entity, &mut DerivedStats, &mut StatusEffects, &Experience), With<PartyMember>>,
+    mut toasts: ResMut<crate::plugins::town::toast::Toasts>,
+    mut party: Query<(Entity, &PartySlot, &CharacterName, &mut DerivedStats, &mut StatusEffects, &Experience), With<PartyMember>>,
 ) {
     if actions.just_pressed(&MenuAction::Cancel) {
         next_sub.set(TownLocation::Square);
@@ -278,22 +317,28 @@ pub fn handle_temple_action(
         return;
     };
 
-    // Resolve target by sorted Entity order (deterministic).
-    let mut members: Vec<Entity> = party.iter().map(|(e, _, _, _)| e).collect();
-    members.sort();
-    let Some(&target) = members.get(temple_state.party_target) else {
+    // Resolve target by PartySlot order (deterministic, matches painter +
+    // dev hotkeys + Guild/Shop conventions).
+    let mut members: Vec<(Entity, usize)> = party
+        .iter()
+        .map(|(e, slot, _, _, _, _)| (e, slot.0))
+        .collect();
+    members.sort_by_key(|(_, slot)| *slot);
+    let Some(&(target, _)) = members.get(temple_state.party_target) else {
         info!("Temple: no party member at cursor {}", temple_state.party_target);
         return;
     };
 
-    let Ok((_, mut derived, mut status, xp)) = party.get_mut(target) else {
+    let Ok((_, _, name, mut derived, mut status, xp)) = party.get_mut(target) else {
         return;
     };
+    let name_str = name.0.clone();
 
     match temple_state.mode {
         TempleMode::Revive => {
             if !status.has(StatusEffectType::Dead) {
                 info!("Temple revive: target is not dead");
+                toasts.push(format!("{name_str} is alive — nothing to revive."));
                 return;
             }
 
@@ -303,6 +348,7 @@ pub fn handle_temple_action(
                     "Temple revive: insufficient gold (have {}, need {})",
                     gold.0, cost
                 );
+                toasts.push(format!("Not enough gold to revive {name_str} (need {cost}g)."));
                 return;
             }
 
@@ -316,7 +362,7 @@ pub fn handle_temple_action(
                 slot: EquipSlot::None,
             });
             let _ = gold.try_spend(cost);
-            next_sub.set(TownLocation::Square);
+            toasts.push(format!("{name_str} has been revived! ({cost}g)"));
             info!(
                 "Temple revived {:?} for {} gold (level {})",
                 target, cost, xp.level
@@ -325,6 +371,7 @@ pub fn handle_temple_action(
         TempleMode::Cure => {
             let Some((kind, cost)) = first_curable_status(services, &status) else {
                 info!("Temple cure: target has no curable status");
+                toasts.push(format!("{name_str} has no curable status."));
                 return;
             };
 
@@ -333,6 +380,7 @@ pub fn handle_temple_action(
                     "Temple cure: insufficient gold (have {}, need {})",
                     gold.0, cost
                 );
+                toasts.push(format!("Not enough gold to cure {kind:?} (need {cost}g)."));
                 return;
             }
 
@@ -343,7 +391,7 @@ pub fn handle_temple_action(
                 slot: EquipSlot::None,
             });
             let _ = gold.try_spend(cost);
-            next_sub.set(TownLocation::Square);
+            toasts.push(format!("Cured {kind:?} on {name_str}. ({cost}g)"));
             info!(
                 "Temple cured {:?} on {:?} for {} gold",
                 kind, target, cost
@@ -401,6 +449,7 @@ mod tests {
 
         app.init_resource::<Gold>();
         app.init_resource::<TempleState>();
+        app.init_resource::<crate::plugins::town::toast::Toasts>();
         app.init_resource::<ActionState<MenuAction>>();
         app.insert_resource(InputMap::<MenuAction>::default());
 
@@ -465,8 +514,12 @@ mod tests {
             ..Default::default()
         };
 
+        // PartySlot index is irrelevant to these tests — they spawn one member
+        // and expect cursor 0 to target it. Using a counter would be overkill.
         app.world_mut().spawn((
             PartyMember,
+            PartySlot(0),
+            CharacterName("Test Hero".to_string()),
             base,
             derived,
             StatusEffects { effects },
