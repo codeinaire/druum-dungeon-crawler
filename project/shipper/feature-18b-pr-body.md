@@ -91,11 +91,91 @@ Low. All changes are additive within an established Town-screen pattern. The two
 1. **Dismiss preserves entity** (no despawn) — Inventory and any future XP/equipment history travel with the dismissed entity into `DismissedPool`. If #19 ever wants to wipe history on dismiss, that's an explicit follow-up.
 2. **Revive order-of-operations** — `effects.retain(!= Dead)` BEFORE `current_hp = 1`. Reversing would zero the player due to clamping. Test `revive_clears_dead_then_sets_hp_to_1` guards this.
 
+## Post-ship polish (added after initial commit)
+
+Items picked up during manual testing of the open PR — included here rather than
+chained as a follow-up because none are big enough to ship separately:
+
+- **Temple revive/cure now targets the right member.** Sort order across Temple
+  painter, Temple handler, and dev hotkeys is unified on `PartySlot.0`
+  (previously the painter sorted by Entity while dev keys hit `iter().next()`).
+  Visible cursor + per-member status badges (`[DEAD]`, `[STONE]`, `[PARALYSIS]`,
+  `[SLEEP]`, `[POISON]`) make selection unambiguous.
+- **Dev hotkeys for test setup** (`--features dev`): F1 = apply Dead to slot 0;
+  F2 = Poison; F3 = Stone+Paralysis+Sleep (all three for testing Temple's
+  auto-pick priority Stone > Paralysis > Sleep). F4 = +500 gold (existing).
+- **Recruit dedup.** New `Resource<RecruitedSet>` prevents the same pool index
+  from being recruited twice; painter shows `"(recruited)"` next to taken
+  entries; handler rejects duplicates.
+- **Layout-aware key bindings.** `apply_logical_key_bindings` (already present
+  for `DungeonAction`) extended to `MenuAction` — Guild verbs (R/G/F/T) and
+  party-target cycling (`[`/`]`) work on Dvorak/AZERTY/Colemak via the
+  keycap-labeled keys, not just QWERTY physical positions.
+- **Shop sell labels** show item names from `ItemAsset.display_name` instead of
+  `"item slot N"`, plus the per-item sell price preview.
+- **Shop party-target cycling.** `[`/`]` cycles which member buys/sells.
+  Bottom-of-screen party strip shows current bag counts and highlights the
+  active member.
+- **Toast notification system** (`src/plugins/town/toast.rs`). Every action
+  (Temple revive/cure, Inn rest, Shop buy/sell, Guild recruit/dismiss/row/slot
+  swap) pushes a top-center on-screen message with 3-second TTL and fade-out.
+  Failure paths also toast (`"Not enough gold (N needed)."`, `"Inventory
+  full."`, `"Mira is already in your party."`, etc.).
+- **Temple and Inn no longer auto-return to Square** after a successful action.
+  Esc/Cancel is the only exit so a player can revive multiple dead members or
+  rest several days without re-entering the screen each time.
+- **Guild header shows current mode** (`Guild — Roster` / `Guild — Recruit`)
+  matching the Shop pattern.
+- **Party-spawn-on-Town-entry** (carried over from #18a follow-up): party also
+  spawns on `OnEnter(GameState::Town)` so testers entering Town directly via
+  F9 cycle without going through Dungeon still have party members to act on.
+
+Test count delta from this polish: **+6 new tests** (recruit dedup, Temple
+revive/cure no-auto-return, Inn rest no-auto-return, two toast TTL paths).
+
 ## Test plan
 
-- [x] All 6 quality gates exit 0 (logged in commit body)
-- [x] +33 net tests vs #18a baseline (verified)
-- [ ] Manual smoke (GPU/display required): `cargo run --features dev`, F4 to grant +500 gold, F9 cycle to Town, navigate to Temple → revive a Dead member → confirm HP=1 and Dead status cleared. Navigate to Guild → recruit one member → dismiss another → row-swap with F → slot-swap with two S presses.
+- [x] All 6 quality gates exit 0 (logged in commit body — re-verified after polish)
+- [x] **305 lib + 6 integration tests pass** (`cargo test --features dev`)
+  — +6 vs the initial #18b commit, +39 vs #18a baseline.
+- [x] No new Cargo dependencies.
+- [ ] **Manual smoke** (GPU/display required):
+  - `cargo run --features dev`
+  - F4 → grant +500 gold (a few times)
+  - F9 → cycle to Town
+  - **Temple — revive:** F1 (kill slot 0), enter Temple, confirm `[DEAD]` badge
+    next to slot 0 → Enter → toast `"X has been revived! (Ng)"`, badge gone,
+    screen stays open.
+  - **Temple — cure (single):** F2-equivalent for Stone via F3, enter Temple,
+    Left/Right toggle to Cure mode, Enter cures Stone → toast → still in
+    Temple. Press Enter again to cure Paralysis, then Sleep. Esc to exit.
+  - **Temple — cure (Inn flow):** F2 to apply Poison, go to Inn, Enter rests
+    the party (heals Poison since Inn cures Poison) → toast `"Party rested.
+    (10g) — Day N."` → still in Inn. Esc to exit.
+  - **Inn — insufficient gold:** spend down to <10g, press Enter → toast `"Not
+    enough gold to rest (10g needed)."` → still in Inn.
+  - **Shop — buy:** enter Shop, Up/Down to pick an item, Enter → toast `"Bought
+    Rusty Sword for Ng."` Try `[` and `]` to cycle which member receives the
+    item; check the party strip at the bottom highlights the active member.
+  - **Shop — sell:** Left/Right toggle to Sell mode; confirm items show
+    by display name (e.g. `"Rusty Sword — sells for 12 gold"`), not `"item slot
+    N"`. Cycle members with `[`/`]`; bag count updates.
+  - **Shop — inventory full / broke:** fill a member's bag to 8 then try to buy
+    → toast `"Inventory full."` Drop gold below an item price → toast `"Not
+    enough gold (N needed)."`
+  - **Guild — header:** Confirm the top of the screen reads `"Guild — Roster"`
+    by default and switches to `"Guild — Recruit"` after R.
+  - **Guild — recruit:** R toggles to Recruit mode, Up/Down to pick, Enter →
+    toast `"X has joined your party!"` and the entry in the recruit panel now
+    shows `"(recruited)"`. Press Enter on the same entry → toast `"X is already
+    in your party."`
+  - **Guild — dismiss / row swap / slot swap:** back to Roster (R), pick a
+    member with Up/Down, G to dismiss → toast `"Dismissed X."`. F to toggle
+    front/back row → toast `"X moved to Back row."`. T then move cursor then T
+    again → toasts `"Slot swap: pinned X..."` then `"Swapped X ↔ Y."`
+  - **Dvorak keyboard:** switch OS layout to Dvorak; confirm the R/G/F/T
+    labeled keycaps still trigger Recruit/Dismiss/RowSwap/SlotSwap, and `[`/`]`
+    keycaps still cycle party target.
 
 ## Awaiting
 

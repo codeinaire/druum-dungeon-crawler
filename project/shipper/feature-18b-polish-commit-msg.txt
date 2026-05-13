@@ -1,0 +1,30 @@
+feat(town): polish #18b — toasts, dev hotkeys, recruit dedup, layout-aware keys
+
+Post-ship fixes and polish picked up during manual testing of PR #19, bundled
+into one follow-up commit:
+
+- Temple revive/cure target bug — unified sort on PartySlot across painter,
+  handler, and dev hotkeys. Visible cursor + per-member status badges.
+- Dev hotkeys: F1 = Dead, F2 = Poison, F3 = Stone+Paralysis+Sleep (for Temple
+  multi-status auto-pick testing). F4 = +500 gold (existing).
+- Recruit dedup via Resource<RecruitedSet>; painter shows "(recruited)" on
+  taken entries.
+- Layout-aware keys: extended apply_logical_key_bindings to MenuAction so R/G/F/T
+  and [/] work on Dvorak/AZERTY/Colemak via the labeled keycap, not the QWERTY
+  physical position.
+- Shop sell labels show ItemAsset.display_name (was "item slot N").
+- Shop party-target cycling: [/] cycles which member buys/sells; party strip
+  in footer highlights active member.
+- Toast notification system (src/plugins/town/toast.rs) — top-center
+  on-screen messages for all Temple/Inn/Shop/Guild actions, 3-second TTL with
+  fade-out, queue capped at 8.
+- Temple and Inn no longer auto-return to Square after a successful action;
+  Esc is the only exit so players can act on multiple members in one visit.
+- Guild header shows current mode ("Guild — Roster" / "Guild — Recruit").
+- Party-spawn now also triggers on OnEnter(GameState::Town) so testers
+  entering Town via F9 (without going through Dungeon first) have a party.
+
++6 new tests: recruit dedup, Temple revive/cure no-auto-return, Inn rest
+no-auto-return, two toast TTL paths. 305 lib + 6 integration tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
