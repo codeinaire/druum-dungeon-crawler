@@ -50,6 +50,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use leafwing_input_manager::prelude::ActionState;
 
+use crate::data::ClassTable;
 use crate::data::town::{MAX_RECRUIT_POOL, RecruitPool, clamp_recruit_pool};
 use crate::plugins::input::MenuAction;
 use crate::plugins::loading::TownAssets;
@@ -58,6 +59,7 @@ use crate::plugins::party::character::{
     PartyRow, PartySize, PartySlot, Race, StatusEffectType, StatusEffects, derive_stats,
 };
 use crate::plugins::party::inventory::Inventory;
+use crate::plugins::party::progression::xp_to_next_level_for;
 use crate::plugins::state::TownLocation;
 use crate::plugins::town::gold::{GameClock, Gold};
 
@@ -108,6 +110,19 @@ pub enum GuildMode {
     Roster,
     /// Browse RecruitPool entries — Confirm spawns a new PartyMember.
     Recruit,
+    // Feature #19 — character creation wizard sub-modes.
+    /// Step 1/5: pick a race.
+    CreateRace,
+    /// Step 2/5: pick a class (filtered by race + ClassTable::get).
+    CreateClass,
+    /// Step 3/5: roll bonus pool; re-roll allowed.
+    CreateRoll,
+    /// Step 3.5/5: distribute pool across 6 stats.
+    CreateAllocate,
+    /// Step 4/5: enter character name.
+    CreateName,
+    /// Step 5/5: review + commit (push to RecruitPool).
+    CreateConfirm,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,9 +163,15 @@ pub fn paint_guild(
 
     egui::TopBottomPanel::top("guild_header").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            let mode_label = match guild_state.mode {
+            let mode_label: &str = match guild_state.mode {
                 GuildMode::Roster => "Guild — Roster",
                 GuildMode::Recruit => "Guild — Recruit",
+                GuildMode::CreateRace => "Guild — Create Character — Step 1 of 6: Race",
+                GuildMode::CreateClass => "Guild — Create Character — Step 2 of 6: Class",
+                GuildMode::CreateRoll => "Guild — Create Character — Step 3 of 6: Roll Bonus",
+                GuildMode::CreateAllocate => "Guild — Create Character — Step 4 of 6: Allocate",
+                GuildMode::CreateName => "Guild — Create Character — Step 5 of 6: Name",
+                GuildMode::CreateConfirm => "Guild — Create Character — Step 6 of 6: Confirm",
             };
             ui.heading(mode_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -158,6 +179,19 @@ pub fn paint_guild(
             });
         });
     });
+
+    // Feature #19 — creation sub-modes render their own CentralPanel via
+    // dedicated painters in guild_create.rs. Skip the CentralPanel here to
+    // avoid a double-CentralPanel egui layout error.
+    match guild_state.mode {
+        GuildMode::CreateRace
+        | GuildMode::CreateClass
+        | GuildMode::CreateRoll
+        | GuildMode::CreateAllocate
+        | GuildMode::CreateName
+        | GuildMode::CreateConfirm => return Ok(()),
+        _ => {}
+    }
 
     egui::CentralPanel::default().show(ctx, |ui| {
         match guild_state.mode {
@@ -194,7 +228,7 @@ pub fn paint_guild(
                 }
 
                 ui.add_space(8.0);
-                ui.label("[Up/Down] Pick  |  [G] Dismiss  |  [F] Toggle Row  |  [T] Slot Swap target  |  [R] Recruit mode  |  [Esc] Back");
+                ui.label("[Up/Down] Pick  |  [G] Dismiss  |  [F] Toggle Row  |  [T] Slot Swap target  |  [R] Recruit mode  |  []] New character  |  [Esc] Back");
             }
             GuildMode::Recruit => {
                 let recruit_pool = town_assets
@@ -237,6 +271,9 @@ pub fn paint_guild(
                 ui.add_space(8.0);
                 ui.label("[Up/Down] Pick  |  [Enter] Recruit  |  [R] Back to Roster  |  [Esc] Back");
             }
+            // Feature #19 creation wizard sub-modes exit early before reaching this
+            // match (see the early-return block above). Only Roster and Recruit reach here.
+            _ => {}
         }
     });
 
@@ -259,19 +296,57 @@ pub fn handle_guild_input(
     town_assets: Option<Res<TownAssets>>,
     pool_assets: Res<Assets<RecruitPool>>,
 ) {
-    if actions.just_pressed(&MenuAction::Cancel) {
+    // Cancel — leave Guild → Town Square. Suppressed in creation sub-modes:
+    // `handle_guild_create_input` owns Cancel there (one step back, not all
+    // the way out to Town).
+    if actions.just_pressed(&MenuAction::Cancel)
+        && !matches!(
+            guild_state.mode,
+            GuildMode::CreateRace
+                | GuildMode::CreateClass
+                | GuildMode::CreateRoll
+                | GuildMode::CreateAllocate
+                | GuildMode::CreateName
+                | GuildMode::CreateConfirm
+        )
+    {
         next_sub.set(TownLocation::Square);
         return;
     }
 
+    // Feature #19 — ']' (NextTarget) while in Roster starts character creation.
+    // Rationale: NextTarget is already bound in default_menu_input_map; repurposing it
+    // here avoids any change to InputMap (Δ Input = 0). See plan §Step 3.14.
+    if actions.just_pressed(&MenuAction::NextTarget)
+        && guild_state.mode == GuildMode::Roster
+    {
+        guild_state.mode = GuildMode::CreateRace;
+        guild_state.cursor = 0;
+        return;
+    }
+
     // R toggles between Roster and Recruit mode (MenuAction::Recruit, KeyR).
+    // In creation wizard sub-modes, R is consumed by handle_guild_create_roll — skip.
     if actions.just_pressed(&MenuAction::Recruit) {
         guild_state.mode = match guild_state.mode {
             GuildMode::Roster => GuildMode::Recruit,
             GuildMode::Recruit => GuildMode::Roster,
+            // In creation sub-modes, R is handled by the creation roll handler.
+            _ => return,
         };
         guild_state.cursor = 0;
         return;
+    }
+
+    // In creation sub-modes, cursor movement and Cancel are handled by guild_create.rs.
+    match guild_state.mode {
+        GuildMode::CreateRace
+        | GuildMode::CreateClass
+        | GuildMode::CreateRoll
+        | GuildMode::CreateAllocate
+        | GuildMode::CreateName
+        | GuildMode::CreateConfirm => return,
+        _ => {}
     }
 
     // Cursor movement.
@@ -284,6 +359,8 @@ pub fn handle_guild_input(
                 .map(|p| clamp_recruit_pool(p, MAX_RECRUIT_POOL).len())
                 .unwrap_or(0)
         }
+        // Handled above — unreachable.
+        _ => 0,
     };
 
     if actions.just_pressed(&MenuAction::Up) && guild_state.cursor > 0 {
@@ -314,6 +391,7 @@ pub fn handle_guild_recruit(
     existing_slots: Query<&PartySlot, With<PartyMember>>,
     town_assets: Option<Res<TownAssets>>,
     pool_assets: Res<Assets<RecruitPool>>,
+    class_assets: Res<Assets<ClassTable>>,
 ) {
     if guild_state.mode != GuildMode::Recruit {
         return;
@@ -362,6 +440,30 @@ pub fn handle_guild_recruit(
         1,
     );
 
+    // Initialize Experience explicitly to L1 with the correct cumulative
+    // threshold for L2. Default-initialization leaves `xp_to_next_level=0`,
+    // which makes `apply_level_up_threshold_system` ghost-trigger an instant
+    // 0→1 level-up (adding `growth_per_level` stats on top of the wizard's
+    // computed values). If the ClassTable asset isn't loaded yet, refuse —
+    // the threshold gets fixed when the player hits the next level boundary.
+    let Some(class_table) = class_assets.get(&assets.class_table) else {
+        toasts.push("Classes still loading — try again in a moment.".to_string());
+        return;
+    };
+    let Some(class_def) = class_table.get(recruit.class) else {
+        info!(
+            "Guild recruit: class {:?} not authored in ClassTable; refusing",
+            recruit.class
+        );
+        toasts.push(format!("Class {:?} not available.", recruit.class));
+        return;
+    };
+    let experience = Experience {
+        level: 1,
+        current_xp: 0,
+        xp_to_next_level: xp_to_next_level_for(class_def, 1),
+    };
+
     commands
         .spawn(PartyMemberBundle {
             name: CharacterName(recruit.name.clone()),
@@ -369,6 +471,7 @@ pub fn handle_guild_recruit(
             class: recruit.class,
             base_stats: recruit.base_stats,
             derived_stats: derived,
+            experience,
             party_row: recruit.default_row,
             party_slot: PartySlot(slot),
             ..Default::default()
@@ -677,11 +780,33 @@ mod tests {
         use crate::data::town::{ShopStock, TownServices};
         app.init_asset::<ShopStock>();
         app.init_asset::<TownServices>();
+        use crate::data::{ClassDef, ClassTable, RaceTable};
+        app.init_asset::<ClassTable>();
+        app.init_asset::<RaceTable>();
+
+        // Populate a minimal ClassTable so `handle_guild_recruit` can read
+        // `xp_to_level_2` to initialize Experience. Each entry sets only the
+        // fields the recruit handler reads; growth/stats remain Default.
+        let mut class_table = ClassTable::default();
+        for class in [Class::Fighter, Class::Mage, Class::Priest] {
+            class_table.classes.push(ClassDef {
+                id: class,
+                xp_to_level_2: 100,
+                xp_curve_factor: 1.5,
+                ..Default::default()
+            });
+        }
+        let class_handle = app
+            .world_mut()
+            .resource_mut::<Assets<ClassTable>>()
+            .add(class_table);
 
         let mock_town_assets = TownAssets {
             shop_stock: Handle::default(),
             recruit_pool: pool_handle,
             services: Handle::default(),
+            race_table: Handle::default(),
+            class_table: class_handle,
         };
         app.insert_resource(mock_town_assets);
 
@@ -853,6 +978,39 @@ mod tests {
         assert_eq!(name.0, "Ser Edran");
         assert!(matches!(race, Race::Human));
         assert!(matches!(class, Class::Fighter));
+    }
+
+    /// Regression: recruit must initialize `Experience` to L1 with the proper
+    /// L2 cumulative threshold. A `..Default::default()`-only spawn left
+    /// `xp_to_next_level=0`, which made `apply_level_up_threshold_system`
+    /// instantly ghost-trigger a 0→1 level-up (adding `growth_per_level`
+    /// stats on top of the wizard's computed values).
+    #[test]
+    fn recruit_initializes_experience_to_l1_not_default() {
+        let mut app = make_guild_test_app();
+        app.world_mut().resource_mut::<GuildState>().mode = GuildMode::Recruit;
+        app.world_mut().resource_mut::<GuildState>().cursor = 0;
+
+        press_confirm(&mut app);
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Experience, With<PartyMember>>();
+        let xps: Vec<_> = q.iter(app.world()).collect();
+        assert_eq!(xps.len(), 1, "Exactly one PartyMember after recruit");
+        let exp = xps[0];
+        assert_eq!(exp.level, 1, "must spawn at level 1, not default 0");
+        assert_eq!(exp.current_xp, 0, "fresh recruit has zero earned XP");
+        assert!(
+            exp.xp_to_next_level > 0,
+            "xp_to_next_level must be the L2 cumulative threshold, not 0 \
+             (zero would ghost-trigger a level-up next frame)"
+        );
+        // Fighter test fixture: xp_to_level_2 = 100 → threshold for L1→L2 is 100.
+        assert_eq!(
+            exp.xp_to_next_level, 100,
+            "L2 threshold for Fighter test fixture must equal xp_to_level_2"
+        );
     }
 
     /// Recruiting the same `RecruitedSet` index twice spawns only ONE entity.

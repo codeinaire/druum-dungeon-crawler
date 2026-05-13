@@ -1,0 +1,85 @@
+// Feature #19 — Race data: per-race signed-i16 stat offsets applied to
+// ClassDef.starting_stats via saturating_add_signed during character creation.
+// Per user decision Q3: 5 races day-one, balanced -2..=+2 offsets.
+//
+// Encoding note: BaseStats fields are u16. Negative offsets are stored as
+// two's-complement bit patterns (e.g. -1 == 65535, -2 == 65534) and
+// reinterpreted as i16 via `field as i16` in allocate_bonus_pool (progression.rs).
+(
+    races: [
+        (
+            id: Human,
+            display_name: "Human",
+            // Human: no modifiers — balanced baseline.
+            stat_modifiers: (
+                strength: 0,
+                intelligence: 0,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
+            description: "Balanced; no modifiers.",
+        ),
+        (
+            id: Elf,
+            display_name: "Elf",
+            // Elf: STR-1, INT+2, PIE+1, VIT-2, AGI+1, LCK-1
+            // Magical and dexterous; physically frail.
+            stat_modifiers: (
+                strength: 65535,     // -1 as i16
+                intelligence: 2,
+                piety: 1,
+                vitality: 65534,     // -2 as i16
+                agility: 1,
+                luck: 65535,         // -1 as i16
+            ),
+            description: "Magical and dexterous; physically frail.",
+        ),
+        (
+            id: Dwarf,
+            display_name: "Dwarf",
+            // Dwarf: STR+2, INT-2, PIE+1, VIT+2, AGI-2, LCK-1
+            // Tough and strong; poor spellcasters.
+            stat_modifiers: (
+                strength: 2,
+                intelligence: 65534, // -2 as i16
+                piety: 1,
+                vitality: 2,
+                agility: 65534,      // -2 as i16
+                luck: 65535,         // -1 as i16
+            ),
+            description: "Tough and strong; poor spellcasters.",
+        ),
+        (
+            id: Gnome,
+            display_name: "Gnome",
+            // Gnome: STR-1, INT+2, PIE+2, VIT-1, AGI+0, LCK-2
+            // Natural divine magic aptitude; slight physique.
+            stat_modifiers: (
+                strength: 65535,     // -1 as i16
+                intelligence: 2,
+                piety: 2,
+                vitality: 65535,     // -1 as i16
+                agility: 0,
+                luck: 65534,         // -2 as i16
+            ),
+            description: "Natural divine magic aptitude; slight physique.",
+        ),
+        (
+            id: Hobbit,
+            display_name: "Hobbit",
+            // Hobbit: STR-2, INT+0, PIE-1, VIT-1, AGI+2, LCK+3
+            // Lucky and nimble; weak and impious.
+            stat_modifiers: (
+                strength: 65534,     // -2 as i16
+                intelligence: 0,
+                piety: 65535,        // -1 as i16
+                vitality: 65535,     // -1 as i16
+                agility: 2,
+                luck: 3,
+            ),
+            description: "Lucky and nimble; weak and impious.",
+        ),
+    ],
+)

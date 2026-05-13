@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 // Reverse dep: data/ imports from plugins/. See file-level doc above.
-use crate::plugins::party::character::{BaseStats, Class};
+use crate::plugins::party::character::{BaseStats, Class, Race};
 
 /// A typed RON asset containing all authored class definitions.
 ///
@@ -43,10 +43,25 @@ impl ClassTable {
     }
 }
 
+/// Prerequisite for advancing into another class (deferred-use in Feature #19;
+/// class-change UI is Q6=C). Stored in `ClassDef.advancement_requirements` as
+/// data-only day-one — no system reads this yet.
+#[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClassRequirement {
+    /// The class the character must have levelled.
+    pub from_class: Class,
+    /// Minimum level required in `from_class`.
+    pub min_level: u32,
+}
+
 /// Per-class definition with deterministic per-level growth (no `rand`).
 ///
 /// Field shape authored per Decision 8 (no `rand` crate, Δ deps = 0).
 /// `starting_equipment` is omitted — items don't exist yet (Feature #12).
+///
+/// **Feature #19 extensions** are all `#[serde(default)]` so existing RON
+/// parses without edits. Populated for Fighter/Mage/Priest in
+/// `assets/classes/core.classes.ron`.
 #[derive(Reflect, Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 pub struct ClassDef {
     /// Discriminator: links this definition to the `Class` enum variant.
@@ -66,6 +81,28 @@ pub struct ClassDef {
     /// Multiplier applied per level in the XP curve:
     /// `xp_to_next = xp_to_level_2 * curve_factor ^ (level - 1)`.
     pub xp_curve_factor: f32,
+
+    // ── Feature #19 — character creation fields ──────────────────────────────
+    /// Minimum stats required to be eligible for this class during creation.
+    /// Each field is checked via `min_stats.X <= base.X` in `can_create_class`.
+    /// Clamped to `[3, 18]` at the trust boundary in `can_create_class`.
+    #[serde(default)]
+    pub min_stats: BaseStats,
+    /// Races permitted to choose this class. Empty = all races allowed.
+    #[serde(default)]
+    pub allowed_races: Vec<Race>,
+    /// Class-change prerequisites (Q6=C: data-only; no system reads this yet).
+    #[serde(default)]
+    pub advancement_requirements: Vec<ClassRequirement>,
+    /// Minimum bonus points rolled during character creation (Q1=1B).
+    #[serde(default)]
+    pub bonus_pool_min: u32,
+    /// Maximum bonus points rolled during character creation (Q1=1B).
+    #[serde(default)]
+    pub bonus_pool_max: u32,
+    /// Stat penalties applied when a character changes class (Q6=C: data-only).
+    #[serde(default)]
+    pub stat_penalty_on_change: BaseStats,
 }
 
 #[cfg(test)]
@@ -96,6 +133,15 @@ mod tests {
             mp_per_level: 0,
             xp_to_level_2: 100,
             xp_curve_factor: 1.5,
+            min_stats: BaseStats {
+                strength: 11,
+                ..BaseStats::ZERO
+            },
+            allowed_races: vec![Race::Human, Race::Elf, Race::Dwarf, Race::Gnome, Race::Hobbit],
+            advancement_requirements: vec![],
+            bonus_pool_min: 5,
+            bonus_pool_max: 9,
+            stat_penalty_on_change: BaseStats::ZERO,
         }
     }
 
@@ -123,6 +169,15 @@ mod tests {
             mp_per_level: 6,
             xp_to_level_2: 100,
             xp_curve_factor: 1.5,
+            min_stats: BaseStats {
+                intelligence: 11,
+                ..BaseStats::ZERO
+            },
+            allowed_races: vec![Race::Human, Race::Elf, Race::Gnome, Race::Hobbit],
+            advancement_requirements: vec![],
+            bonus_pool_min: 5,
+            bonus_pool_max: 9,
+            stat_penalty_on_change: BaseStats::ZERO,
         }
     }
 

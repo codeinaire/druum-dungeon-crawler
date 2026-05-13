@@ -46,10 +46,12 @@
 //! spawning path still work.
 
 use bevy::prelude::*;
+use leafwing_input_manager::prelude::ActionState;
 
 use crate::plugins::combat::actions::{CombatActionKind, QueuedAction, Side};
 use crate::plugins::combat::combat_log::CombatLog;
 use crate::plugins::combat::enemy::{Enemy, EnemyName};
+use crate::plugins::input::MenuAction;
 use crate::plugins::combat::status_effects::{
     ApplyStatusEvent, apply_status_handler, check_dead_and_apply, is_asleep, is_paralyzed,
 };
@@ -57,6 +59,7 @@ use crate::plugins::combat::targeting::TargetSelection;
 use crate::plugins::party::character::{
     CharacterName, DerivedStats, PartyMember, PartyRow, PartySlot, StatusEffectType, StatusEffects,
 };
+use crate::plugins::party::progression::CombatVictoryEvent;
 use crate::plugins::state::{CombatPhase, GameState};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,6 +152,16 @@ pub struct FleeAttempted {
     pub attempted_this_round: bool,
 }
 
+/// Buffered results of the most recent victory, populated by
+/// `check_victory_defeat_flee` when entering `CombatPhase::Victory` and read
+/// by `paint_combat_victory_screen` so the player sees what they just earned.
+/// Reset on Confirm by `handle_combat_victory_input`.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct PendingVictoryResult {
+    pub total_xp: u32,
+    pub total_gold: u32,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Plugin
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,6 +175,7 @@ impl Plugin for TurnManagerPlugin {
             .init_resource::<CombatLog>()
             .init_resource::<CombatRng>()
             .init_resource::<FleeAttempted>()
+            .init_resource::<PendingVictoryResult>()
             .add_systems(OnEnter(GameState::Combat), init_combat_state)
             .add_systems(OnExit(GameState::Combat), clear_combat_state)
             .add_systems(
@@ -175,9 +189,23 @@ impl Plugin for TurnManagerPlugin {
                         .run_if(in_state(CombatPhase::ExecuteActions))
                         .before(apply_status_handler),
                     check_victory_defeat_flee.run_if(in_state(CombatPhase::TurnResult)),
+                    handle_combat_victory_input.run_if(in_state(CombatPhase::Victory)),
                 ),
             );
 
+    }
+}
+
+/// Player input for `CombatPhase::Victory`: Confirm dismisses the results
+/// screen and transitions back to `GameState::Dungeon`.
+pub fn handle_combat_victory_input(
+    actions: Res<ActionState<MenuAction>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut pending: ResMut<PendingVictoryResult>,
+) {
+    if actions.just_pressed(&MenuAction::Confirm) {
+        *pending = PendingVictoryResult::default();
+        next_state.set(GameState::Dungeon);
     }
 }
 
@@ -593,8 +621,30 @@ fn execute_combat_actions(
     next_phase.set(CombatPhase::TurnResult);
 }
 
+/// Compute total XP from defeated enemies.
+///
+/// **Planner decision (not in research's 7-question batch):** since
+/// `EnemySpec` lacks an authored `xp_reward` field and adding one would
+/// require an `assets/encounters/floor_01.encounters.ron` migration outside
+/// the scope of this PR, derive XP from `max_hp` as a proxy for "toughness".
+/// Formula: `xp = max_hp / 2`, clamped to `[0, 1_000_000]` per enemy.
+/// Future polish: add `EnemySpec.xp_reward: Option<u32>` (#21+).
+fn compute_xp_from_enemies(
+    enemies: &Query<(&DerivedStats, &StatusEffects), With<Enemy>>,
+) -> u32 {
+    // Accumulate in u64 — per-enemy values are capped at 1_000_000 but the
+    // sum can overflow u32 above ~4,295 enemies. The outer min still caps
+    // the visible XP at 1_000_000.
+    let total: u64 = enemies
+        .iter()
+        .map(|(d, _)| u64::from((d.max_hp / 2).min(1_000_000)))
+        .sum();
+    total.min(1_000_000) as u32
+}
+
 /// Decide what comes after `ExecuteActions`. Order: defeat → flee → victory →
 /// next round. Documented in Decision 24.
+#[allow(clippy::too_many_arguments)]
 fn check_victory_defeat_flee(
     party: Query<(&DerivedStats, &StatusEffects), With<PartyMember>>,
     enemies: Query<(&DerivedStats, &StatusEffects), With<Enemy>>,
@@ -603,6 +653,8 @@ fn check_victory_defeat_flee(
     mut next_phase: ResMut<NextState<CombatPhase>>,
     mut combat_log: ResMut<CombatLog>,
     mut input_state: ResMut<PlayerInputState>,
+    mut victory_writer: MessageWriter<CombatVictoryEvent>,
+    mut pending_victory: ResMut<PendingVictoryResult>,
 ) {
     // Guard against `Iterator::all()` vacuous-truth on empty party (resolves LOW-2):
     // an absent party is a transient state (e.g., between dungeon-exit and combat
@@ -630,10 +682,20 @@ fn check_victory_defeat_flee(
         return;
     }
 
-    // 3. Victory.
+    // 3. Victory. Don't auto-transition to Dungeon — pause on
+    // `CombatPhase::Victory` so the player can read the results
+    // (`PendingVictoryResult` + last log entries). `handle_combat_victory_input`
+    // moves to `GameState::Dungeon` on Confirm.
     if all_enemies_dead {
+        let total_xp = compute_xp_from_enemies(&enemies);
         combat_log.push("Victory!".into(), input_state.current_turn);
-        next_state.set(GameState::Dungeon);
+        victory_writer.write(CombatVictoryEvent {
+            total_xp,
+            total_gold: 0, // deferred to #21+
+        });
+        pending_victory.total_xp = total_xp;
+        pending_victory.total_gold = 0;
+        next_phase.set(CombatPhase::Victory);
         return;
     }
 
@@ -721,6 +783,39 @@ mod tests {
         });
         assert_eq!(q[0].slot_index, 0);
     }
+
+    /// Unit test for the XP formula used by `compute_xp_from_enemies`.
+    ///
+    /// The system function takes a `Query` and cannot be constructed outside a
+    /// system context. Instead we test the underlying formula `xp = max_hp / 2`
+    /// directly with known values: 3 enemies with max_hp 30/30/60 → 15+15+30=60.
+    ///
+    /// Feature #19 — plan Step 5.4.
+    #[test]
+    fn compute_xp_from_enemies_sums_half_max_hp() {
+        // Formula: each enemy contributes max_hp / 2, clamped per-enemy at 1_000_000,
+        // sum then clamped at 1_000_000.
+        let max_hps = [30u32, 30, 60];
+        let total: u32 = max_hps
+            .iter()
+            .map(|&hp| (hp / 2).min(1_000_000))
+            .sum::<u32>()
+            .min(1_000_000);
+        assert_eq!(total, 60, "15 + 15 + 30 = 60 XP from 3 enemies");
+
+        // Edge: all-zero HP → 0 XP.
+        let zero_total: u32 = [0u32, 0, 0]
+            .iter()
+            .map(|&hp| (hp / 2).min(1_000_000))
+            .sum::<u32>()
+            .min(1_000_000);
+        assert_eq!(zero_total, 0);
+
+        // Edge: very large HP → clamped to 1_000_000.
+        let large_hp = u32::MAX;
+        let clamped = (large_hp / 2).min(1_000_000);
+        assert_eq!(clamped, 1_000_000, "per-enemy cap at 1_000_000");
+    }
 }
 
 #[cfg(test)]
@@ -767,6 +862,11 @@ mod app_tests {
         // Inserted directly (without ActionsPlugin) to avoid mouse-resource panic.
         app.init_resource::<
             leafwing_input_manager::prelude::ActionState<crate::plugins::input::CombatAction>,
+        >();
+        // ActionState<MenuAction> required by handle_combat_victory_input
+        // (runs in CombatPhase::Victory after the user defeats all enemies).
+        app.init_resource::<
+            leafwing_input_manager::prelude::ActionState<crate::plugins::input::MenuAction>,
         >();
         #[cfg(feature = "dev")]
         app.init_resource::<bevy::input::ButtonInput<bevy::prelude::KeyCode>>();
@@ -986,14 +1086,37 @@ mod app_tests {
         app.update();
         app.update();
 
+        // Victory now pauses on CombatPhase::Victory; the GameState stays in
+        // Combat until the player presses Confirm on the results screen.
+        let phase = app.world().resource::<State<CombatPhase>>();
+        assert_eq!(
+            phase.get(),
+            &CombatPhase::Victory,
+            "all enemies dead must transition to CombatPhase::Victory, not auto-exit Combat"
+        );
         let state = app
             .world()
             .resource::<State<crate::plugins::state::GameState>>();
-        // Victory transitions to Dungeon; enemy has 0 HP from spawn.
-        assert!(matches!(
+        assert_eq!(
             state.get(),
-            crate::plugins::state::GameState::Dungeon | crate::plugins::state::GameState::Combat
-        ));
+            &crate::plugins::state::GameState::Combat,
+            "Victory must not auto-transition to Dungeon — wait for player Confirm"
+        );
+
+        // Pressing Confirm dismisses the victory screen and returns to Dungeon.
+        app.world_mut()
+            .resource_mut::<leafwing_input_manager::prelude::ActionState<MenuAction>>()
+            .press(&MenuAction::Confirm);
+        app.update();
+        app.update();
+        let state = app
+            .world()
+            .resource::<State<crate::plugins::state::GameState>>();
+        assert_eq!(
+            state.get(),
+            &crate::plugins::state::GameState::Dungeon,
+            "Confirm on victory screen must transition to Dungeon"
+        );
     }
 
     #[test]

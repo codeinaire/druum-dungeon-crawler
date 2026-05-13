@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RecruitPool, ShopStock, SpellTable, TownServices};
+use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RaceTable, RecruitPool, ShopStock, SpellTable, TownServices};
 use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
@@ -87,7 +87,8 @@ pub struct AudioAssets {
     pub sfx_door_close: Handle<AudioSource>,
 }
 
-/// Town asset handles — shop catalogue, recruit pool, and service costs.
+/// Town asset handles — shop catalogue, recruit pool, service costs, and race
+/// table for character creation (Feature #19).
 ///
 /// Loaded by `bevy_asset_loader` alongside `DungeonAssets` and `AudioAssets`.
 /// Both derives are required: `AssetCollection` for the loading-state machinery,
@@ -100,6 +101,12 @@ pub struct TownAssets {
     pub recruit_pool: Handle<RecruitPool>,
     #[asset(path = "town/core.town_services.ron")]
     pub services: Handle<TownServices>,
+    // Feature #19 — race table for character creation.
+    #[asset(path = "races/core.races.racelist.ron")]
+    pub race_table: Handle<RaceTable>,
+    // Feature #19 — class table needed by creation wizard in TownAssets context.
+    #[asset(path = "classes/core.classes.ron")]
+    pub class_table: Handle<ClassTable>,
 }
 
 /// Marker tag on every entity spawned by `spawn_loading_screen`.
@@ -130,6 +137,7 @@ impl Plugin for LoadingPlugin {
                 RonAssetPlugin::<ShopStock>::new(&["shop_stock.ron"]),      // Feature #18
                 RonAssetPlugin::<RecruitPool>::new(&["recruit_pool.ron"]),  // Feature #18
                 RonAssetPlugin::<TownServices>::new(&["town_services.ron"]), // Feature #18
+                RonAssetPlugin::<RaceTable>::new(&["racelist.ron"]),        // Feature #19 — race table for character creation
             ))
             // (2) Drive GameState::Loading -> TitleScreen once all
             //     handles in DungeonAssets report LoadedWithDependencies.

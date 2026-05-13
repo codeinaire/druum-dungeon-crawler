@@ -29,6 +29,7 @@ use bevy_egui::{EguiPrimaryContextPass, PrimaryEguiContext};
 
 pub mod gold;
 pub mod guild;
+pub mod guild_create;
 pub mod inn;
 pub mod shop;
 pub mod square;
@@ -40,9 +41,16 @@ pub use gold::{GameClock, Gold, SpendError};
 use crate::plugins::state::{GameState, TownLocation};
 
 use guild::{
-    DismissedPool, GuildState, RecruitedSet,
+    DismissedPool, GuildMode, GuildState, RecruitedSet,
     handle_guild_dismiss, handle_guild_input, handle_guild_recruit,
     handle_guild_row_swap, handle_guild_slot_swap, paint_guild,
+};
+use guild_create::{
+    CreationDraft,
+    handle_guild_create_allocate, handle_guild_create_confirm, handle_guild_create_input,
+    handle_guild_create_name_input, handle_guild_create_roll,
+    paint_guild_create_allocate, paint_guild_create_class, paint_guild_create_confirm,
+    paint_guild_create_name, paint_guild_create_race, paint_guild_create_roll,
 };
 use inn::{InnState, handle_inn_rest, paint_inn};
 use shop::{ShopState, handle_shop_input, paint_shop};
@@ -88,6 +96,19 @@ fn despawn_town_camera(mut commands: Commands, cams: Query<Entity, With<TownCame
 // TownPlugin
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Guild creation mode guard helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns a `run_if` closure that returns `true` when `GuildState.mode == target`.
+///
+/// `GuildMode` is NOT a Bevy `States` impl, so per-variant `.run_if` uses this
+/// closure rather than `in_state(...)`. Mirrors the per-mode painter dispatch
+/// from the Roster/Recruit split.
+fn in_guild_mode(target: GuildMode) -> impl Fn(Res<GuildState>) -> bool + Clone {
+    move |state: Res<GuildState>| state.mode == target
+}
+
 pub struct TownPlugin;
 
 impl Plugin for TownPlugin {
@@ -102,7 +123,15 @@ impl Plugin for TownPlugin {
             .init_resource::<GuildState>()
             .init_resource::<DismissedPool>()
             .init_resource::<RecruitedSet>()
-            .init_resource::<Toasts>();
+            .init_resource::<Toasts>()
+            // Feature #19 — creation draft resource.
+            .init_resource::<CreationDraft>();
+
+        // Feature #19 — discard draft when leaving Guild (mid-creation cancel).
+        app.add_systems(
+            OnExit(TownLocation::Guild),
+            |mut d: ResMut<CreationDraft>| d.reset(),
+        );
 
         // Camera lifecycle.
         app.add_systems(OnEnter(GameState::Town), spawn_town_camera)
@@ -122,6 +151,25 @@ impl Plugin for TownPlugin {
                     .run_if(in_state(TownLocation::Temple)),
                 paint_guild
                     .run_if(in_state(TownLocation::Guild)),
+                // Feature #19 — creation wizard painters (gated on GuildMode variant).
+                paint_guild_create_race
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateRace)),
+                paint_guild_create_class
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateClass)),
+                paint_guild_create_roll
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateRoll)),
+                paint_guild_create_allocate
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateAllocate)),
+                paint_guild_create_name
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateName)),
+                paint_guild_create_confirm
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::CreateConfirm)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
@@ -154,6 +202,18 @@ impl Plugin for TownPlugin {
                 handle_guild_row_swap
                     .run_if(in_state(TownLocation::Guild)),
                 handle_guild_slot_swap
+                    .run_if(in_state(TownLocation::Guild)),
+                // Feature #19 — creation wizard handlers (all gated at TownLocation::Guild;
+                // internal mode guard is inside each handler).
+                handle_guild_create_input
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_create_allocate
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_create_name_input
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_create_roll
+                    .run_if(in_state(TownLocation::Guild)),
+                handle_guild_create_confirm
                     .run_if(in_state(TownLocation::Guild)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
