@@ -463,6 +463,8 @@ mod tests {
             shop_stock: Handle::default(),
             recruit_pool: Handle::default(),
             services: services_handle,
+            race_table: Handle::default(),
+            class_table: Handle::default(),
         };
         app.insert_resource(mock_town_assets);
 

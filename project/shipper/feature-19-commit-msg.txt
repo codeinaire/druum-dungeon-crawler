@@ -1,0 +1,22 @@
+feat(party): add character creation wizard and leveling/XP system (#19)
+
+Implements the six-step Guild creation wizard (race → class → roll/allocate
+stats → name → confirm), a pure-function progression module, five-race RON
+asset, extended ClassDef, and a combat-XP hook. Pre-ship review (1 HIGH +
+2 MEDIUM) fully addressed: ghost level-up on recruit fixed by initializing
+Experience at level=1 with computed xp_to_next_level; u32 sum overflow in
+compute_xp_from_enemies changed to u64 accumulation; recompute_xp_to_next_level
+annotated with class-change advisory. LOW (_rng/_current forward-compat
+params) intentionally deferred. Zero new Cargo deps; +26 net tests.
+
+Key decisions (plan §Q1–Q7):
+- Q1 Stat allocation: bonus-pool with unlimited re-roll (locks on first allocate)
+- Q2 MVP roster: Fighter / Mage / Priest only (filter: ClassTable::get.is_some())
+- Q3 Races: Human, Elf, Dwarf, Gnome, Hobbit day-one; Hobbit LCK+3 intentional
+- Q4 Destination: push to RecruitPool; auto-switch cursor to new entry
+- Q5 XP curve: xp_to_level_2 * xp_curve_factor.powi(level-1) per class
+- Q6 Class-change penalty: data-only day-one (advancement_requirements authored,
+  no UI or mutation system yet)
+- Q7 Level cap: 99 hard; current_xp accumulates above threshold
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

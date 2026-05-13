@@ -1,6 +1,11 @@
 // Feature #11 v1 class roster: Fighter / Mage / Priest only.
 // Five classes (Thief, Bishop, Samurai, Lord, Ninja) declared in the Class enum
 // but NOT authored here — Decision 1.
+//
+// Feature #19: new fields (min_stats, allowed_races, bonus_pool_min/max,
+// advancement_requirements, stat_penalty_on_change) added to each entry.
+// All are #[serde(default)] so old-format RON still parses — these values
+// are authoritative for character creation.
 (
     classes: [
         (
@@ -26,6 +31,28 @@
             mp_per_level: 0,
             xp_to_level_2: 100,
             xp_curve_factor: 1.5,
+            // Feature #19 — Wizardry-1 convention: STR >= 11 to be a Fighter.
+            min_stats: (
+                strength: 11,
+                intelligence: 0,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
+            allowed_races: [Human, Elf, Dwarf, Gnome, Hobbit],
+            advancement_requirements: [],
+            bonus_pool_min: 5,
+            bonus_pool_max: 9,
+            // Q6=C: class-change UI deferred; penalty is data-only.
+            stat_penalty_on_change: (
+                strength: 0,
+                intelligence: 0,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
         ),
         (
             id: Mage,
@@ -50,6 +77,27 @@
             mp_per_level: 6,
             xp_to_level_2: 100,
             xp_curve_factor: 1.5,
+            // Feature #19 — INT >= 11 to be a Mage. Dwarves excluded (low INT race).
+            min_stats: (
+                strength: 0,
+                intelligence: 11,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
+            allowed_races: [Human, Elf, Gnome, Hobbit],
+            advancement_requirements: [],
+            bonus_pool_min: 5,
+            bonus_pool_max: 9,
+            stat_penalty_on_change: (
+                strength: 0,
+                intelligence: 0,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
         ),
         (
             id: Priest,
@@ -74,6 +122,27 @@
             mp_per_level: 5,
             xp_to_level_2: 100,
             xp_curve_factor: 1.5,
+            // Feature #19 — PIE >= 11 to be a Priest. Hobbits excluded (low PIE race).
+            min_stats: (
+                strength: 0,
+                intelligence: 0,
+                piety: 11,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
+            allowed_races: [Human, Elf, Dwarf, Gnome],
+            advancement_requirements: [],
+            bonus_pool_min: 5,
+            bonus_pool_max: 9,
+            stat_penalty_on_change: (
+                strength: 0,
+                intelligence: 0,
+                piety: 0,
+                vitality: 0,
+                agility: 0,
+                luck: 0,
+            ),
         ),
     ],
 )

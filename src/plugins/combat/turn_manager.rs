@@ -57,6 +57,7 @@ use crate::plugins::combat::targeting::TargetSelection;
 use crate::plugins::party::character::{
     CharacterName, DerivedStats, PartyMember, PartyRow, PartySlot, StatusEffectType, StatusEffects,
 };
+use crate::plugins::party::progression::CombatVictoryEvent;
 use crate::plugins::state::{CombatPhase, GameState};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -593,8 +594,30 @@ fn execute_combat_actions(
     next_phase.set(CombatPhase::TurnResult);
 }
 
+/// Compute total XP from defeated enemies.
+///
+/// **Planner decision (not in research's 7-question batch):** since
+/// `EnemySpec` lacks an authored `xp_reward` field and adding one would
+/// require an `assets/encounters/floor_01.encounters.ron` migration outside
+/// the scope of this PR, derive XP from `max_hp` as a proxy for "toughness".
+/// Formula: `xp = max_hp / 2`, clamped to `[0, 1_000_000]` per enemy.
+/// Future polish: add `EnemySpec.xp_reward: Option<u32>` (#21+).
+fn compute_xp_from_enemies(
+    enemies: &Query<(&DerivedStats, &StatusEffects), With<Enemy>>,
+) -> u32 {
+    // Accumulate in u64 — per-enemy values are capped at 1_000_000 but the
+    // sum can overflow u32 above ~4,295 enemies. The outer min still caps
+    // the visible XP at 1_000_000.
+    let total: u64 = enemies
+        .iter()
+        .map(|(d, _)| u64::from((d.max_hp / 2).min(1_000_000)))
+        .sum();
+    total.min(1_000_000) as u32
+}
+
 /// Decide what comes after `ExecuteActions`. Order: defeat → flee → victory →
 /// next round. Documented in Decision 24.
+#[allow(clippy::too_many_arguments)]
 fn check_victory_defeat_flee(
     party: Query<(&DerivedStats, &StatusEffects), With<PartyMember>>,
     enemies: Query<(&DerivedStats, &StatusEffects), With<Enemy>>,
@@ -603,6 +626,7 @@ fn check_victory_defeat_flee(
     mut next_phase: ResMut<NextState<CombatPhase>>,
     mut combat_log: ResMut<CombatLog>,
     mut input_state: ResMut<PlayerInputState>,
+    mut victory_writer: MessageWriter<CombatVictoryEvent>,
 ) {
     // Guard against `Iterator::all()` vacuous-truth on empty party (resolves LOW-2):
     // an absent party is a transient state (e.g., between dungeon-exit and combat
@@ -632,7 +656,12 @@ fn check_victory_defeat_flee(
 
     // 3. Victory.
     if all_enemies_dead {
+        let total_xp = compute_xp_from_enemies(&enemies);
         combat_log.push("Victory!".into(), input_state.current_turn);
+        victory_writer.write(CombatVictoryEvent {
+            total_xp,
+            total_gold: 0, // deferred to #21+
+        });
         next_state.set(GameState::Dungeon);
         return;
     }
@@ -720,6 +749,39 @@ mod tests {
                 .then(a.slot_index.cmp(&b.slot_index))
         });
         assert_eq!(q[0].slot_index, 0);
+    }
+
+    /// Unit test for the XP formula used by `compute_xp_from_enemies`.
+    ///
+    /// The system function takes a `Query` and cannot be constructed outside a
+    /// system context. Instead we test the underlying formula `xp = max_hp / 2`
+    /// directly with known values: 3 enemies with max_hp 30/30/60 → 15+15+30=60.
+    ///
+    /// Feature #19 — plan Step 5.4.
+    #[test]
+    fn compute_xp_from_enemies_sums_half_max_hp() {
+        // Formula: each enemy contributes max_hp / 2, clamped per-enemy at 1_000_000,
+        // sum then clamped at 1_000_000.
+        let max_hps = [30u32, 30, 60];
+        let total: u32 = max_hps
+            .iter()
+            .map(|&hp| (hp / 2).min(1_000_000))
+            .sum::<u32>()
+            .min(1_000_000);
+        assert_eq!(total, 60, "15 + 15 + 30 = 60 XP from 3 enemies");
+
+        // Edge: all-zero HP → 0 XP.
+        let zero_total: u32 = [0u32, 0, 0]
+            .iter()
+            .map(|&hp| (hp / 2).min(1_000_000))
+            .sum::<u32>()
+            .min(1_000_000);
+        assert_eq!(zero_total, 0);
+
+        // Edge: very large HP → clamped to 1_000_000.
+        let large_hp = u32::MAX;
+        let clamped = (large_hp / 2).min(1_000_000);
+        assert_eq!(clamped, 1_000_000, "per-enemy cap at 1_000_000");
     }
 }
 

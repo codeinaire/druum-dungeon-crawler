@@ -1,7 +1,8 @@
 //! Party management plugin — character data, bundle, party-size resource,
 //! and dev-only debug-party spawn.
 //!
-//! Inventory and progression systems land in #12 / #14.
+//! Inventory and progression systems land in #12 / #14. Feature #19 adds
+//! `progression.rs` with XP, level-up, and character creation math.
 
 use bevy::prelude::*;
 
@@ -10,6 +11,7 @@ use crate::plugins::state::GameState;
 
 pub mod character;
 pub mod inventory;
+pub mod progression;
 
 pub use character::{
     ActiveEffect, BaseStats, CharacterName, Class, DerivedStats, Equipment, Experience,
@@ -23,10 +25,19 @@ pub use inventory::{
     recompute_derived_stats_on_equipment_change, unequip_item,
 };
 
+pub use progression::{
+    AllocError, CombatVictoryEvent, CreateError, ProgressionRng, StatGains,
+    allocate_bonus_pool, can_create_class, level_cap, level_up,
+    recompute_xp_to_next_level, roll_bonus_pool, xp_for_level,
+};
+
 pub struct PartyPlugin;
 
 impl Plugin for PartyPlugin {
     fn build(&self, app: &mut App) {
+        // Feature #19 — progression plugin (XP, level-up, creation math).
+        app.add_plugins(progression::PartyProgressionPlugin);
+
         // PartySize defaults to 4 (hard cap in v1; #19 may reduce for scenarios).
         app.init_resource::<PartySize>();
 
