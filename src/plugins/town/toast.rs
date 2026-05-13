@@ -131,4 +131,36 @@ mod tests {
         let last_msg = format!("msg {}", MAX_TOAST_QUEUE + 2);
         assert_eq!(t.queue.last().unwrap().message, last_msg);
     }
+
+    /// `tick_toasts` runs as a Bevy system; we test the algorithm directly by
+    /// mutating `remaining_secs` and applying the retain step, which is exactly
+    /// what the system body does.
+    #[test]
+    fn toast_expires_after_ttl_elapsed() {
+        let mut t = Toasts::default();
+        t.push_with_ttl("ephemeral", 0.5);
+        // Simulate two 0.3-second ticks → 0.6 seconds total elapsed.
+        for toast in &mut t.queue {
+            toast.remaining_secs -= 0.6;
+        }
+        t.queue.retain(|toast| toast.remaining_secs > 0.0);
+        assert!(t.queue.is_empty(), "toast must be dropped once TTL fully elapses");
+    }
+
+    /// Toasts inside their TTL window survive one tick.
+    #[test]
+    fn toast_survives_partial_tick() {
+        let mut t = Toasts::default();
+        t.push_with_ttl("hold", 2.0);
+        for toast in &mut t.queue {
+            toast.remaining_secs -= 0.5;
+        }
+        t.queue.retain(|toast| toast.remaining_secs > 0.0);
+        assert_eq!(t.queue.len(), 1);
+        assert!(
+            (t.queue[0].remaining_secs - 1.5).abs() < 1e-6,
+            "remaining_secs should decrement by the tick amount (got {})",
+            t.queue[0].remaining_secs
+        );
+    }
 }

@@ -452,4 +452,25 @@ mod tests {
         let dead_hp = app.world().get::<DerivedStats>(dead).unwrap().current_hp;
         assert_eq!(dead_hp, 0, "Dead member HP should remain 0 after Inn rest");
     }
+
+    /// After a successful rest, the screen stays in `TownLocation::Inn`.
+    /// Returning to Square is user-initiated via Cancel only.
+    #[test]
+    fn rest_does_not_auto_return_to_square() {
+        let mut app = make_inn_test_app();
+        app.world_mut().resource_mut::<Gold>().0 = 100;
+        let _m = spawn_party_member(&mut app, 20, 10, vec![]);
+
+        press_confirm(&mut app);
+
+        // Sanity: rest succeeded (clock advanced).
+        let clock = app.world().resource::<GameClock>();
+        assert_eq!(clock.day, 1, "rest should advance the clock");
+
+        assert_eq!(
+            *app.world().resource::<State<TownLocation>>().get(),
+            TownLocation::Inn,
+            "Inn must stay open after rest — only Cancel returns to Square"
+        );
+    }
 }

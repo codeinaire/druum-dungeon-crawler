@@ -855,6 +855,35 @@ mod tests {
         assert!(matches!(class, Class::Fighter));
     }
 
+    /// Recruiting the same `RecruitedSet` index twice spawns only ONE entity.
+    /// `RecruitedSet` tracks taken pool indices to prevent duplicate recruits.
+    #[test]
+    fn recruit_same_pool_index_twice_only_spawns_once() {
+        let mut app = make_guild_test_app();
+        app.world_mut().resource_mut::<GuildState>().mode = GuildMode::Recruit;
+        app.world_mut().resource_mut::<GuildState>().cursor = 0;
+
+        // First press → recruits pool index 0.
+        press_confirm(&mut app);
+
+        // Guild auto-switches to Roster after success — reset back to Recruit
+        // to attempt the duplicate.
+        app.world_mut().resource_mut::<GuildState>().mode = GuildMode::Recruit;
+        app.world_mut().resource_mut::<GuildState>().cursor = 0;
+        press_confirm(&mut app);
+
+        let count = app
+            .world_mut()
+            .query_filtered::<(), With<PartyMember>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 1, "Second recruit on same pool index must be rejected");
+
+        let recruited = app.world().resource::<RecruitedSet>();
+        assert_eq!(recruited.indices.len(), 1);
+        assert!(recruited.indices.contains(&0));
+    }
+
     #[test]
     fn recruit_picks_lowest_free_slot_after_dismissal() {
         let mut app = make_guild_test_app();

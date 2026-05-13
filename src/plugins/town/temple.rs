@@ -789,4 +789,57 @@ mod tests {
             TownLocation::Square
         );
     }
+
+    /// After a successful revive, the screen stays in `TownLocation::Temple`.
+    /// Returning to Square is user-initiated (Cancel only) so a player can
+    /// revive multiple dead members without re-entering the screen each time.
+    #[test]
+    fn revive_does_not_auto_return_to_square() {
+        let mut app = make_temple_test_app();
+        app.world_mut().resource_mut::<Gold>().0 = 1000;
+
+        let member = spawn_party_member(&mut app, 20, 10, 1, vec![make_dead_effect()]);
+        app.world_mut()
+            .get_mut::<DerivedStats>(member)
+            .unwrap()
+            .current_hp = 0;
+
+        press_confirm(&mut app);
+
+        let status = app.world().get::<StatusEffects>(member).unwrap();
+        assert!(!status.has(StatusEffectType::Dead), "Revive must clear Dead");
+
+        assert_eq!(
+            *app.world().resource::<State<TownLocation>>().get(),
+            TownLocation::Temple,
+            "Temple must stay open after revive — only Cancel returns to Square"
+        );
+    }
+
+    /// After a successful cure, the screen stays in `TownLocation::Temple`.
+    #[test]
+    fn cure_does_not_auto_return_to_square() {
+        let mut app = make_temple_test_app();
+        app.world_mut().resource_mut::<Gold>().0 = 1000;
+        app.world_mut().resource_mut::<TempleState>().mode = TempleMode::Cure;
+
+        let member = spawn_party_member(
+            &mut app,
+            20,
+            10,
+            1,
+            vec![make_status_effect(StatusEffectType::Stone)],
+        );
+
+        press_confirm(&mut app);
+
+        let status = app.world().get::<StatusEffects>(member).unwrap();
+        assert!(!status.has(StatusEffectType::Stone), "Cure must clear Stone");
+
+        assert_eq!(
+            *app.world().resource::<State<TownLocation>>().get(),
+            TownLocation::Temple,
+            "Temple must stay open after cure"
+        );
+    }
 }
