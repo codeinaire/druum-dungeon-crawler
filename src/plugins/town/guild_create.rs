@@ -685,6 +685,14 @@ pub fn handle_guild_create_name_input(
                     draft.name.push_str(s);
                 }
             }
+            // Space is a named variant in Bevy 0.18's `Key`, NOT
+            // `Key::Character(" ")` — so it would otherwise fall through
+            // to `_ => {}` and be silently dropped.
+            Key::Space => {
+                if draft.name.len() < MAX_NAME_LEN {
+                    draft.name.push(' ');
+                }
+            }
             Key::Backspace => {
                 draft.name.pop();
             }
