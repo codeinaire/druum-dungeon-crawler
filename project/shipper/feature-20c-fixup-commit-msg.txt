@@ -1,0 +1,11 @@
+docs(combat): address review findings (#24) — spell_cursor reset path comment
+
+Add a NOTE comment to the Cancel arm of the menu-action handler clarifying
+that spell_cursor is reset on *entry* to SpellMenu (Main arm case 2, line
+532), not on exit. Future code pushing SpellMenu directly (bypassing case 2)
+must reset it manually; without this comment the contract is silent and
+the stale-cursor risk is invisible. No behavior change. See review doc at
+project/reviews/20260514-210000-feature-20c-spell-menu.md. Comment-only —
+test count unchanged: 365/365 lib, 369/369 dev-party, 8/8 integration.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

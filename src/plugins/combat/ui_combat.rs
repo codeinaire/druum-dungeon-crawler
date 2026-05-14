@@ -468,6 +468,8 @@ fn handle_combat_input(
         .unwrap_or(MenuFrame::Main);
 
     // Cancel: pop submenu (top-of-stack only; Main does nothing).
+    // NOTE: spell_cursor is reset on *entry* to SpellMenu (Main arm case 2, line 532),
+    // not on exit. Any future code that pushes SpellMenu directly must reset it.
     if actions.just_pressed(&MenuNavAction::Cancel) {
         if input_state.menu_stack.len() > 1 {
             input_state.menu_stack.pop();

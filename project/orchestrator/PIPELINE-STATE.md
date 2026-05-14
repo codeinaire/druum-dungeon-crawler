@@ -1,16 +1,16 @@
 # Pipeline State
 
 **Task:** Druum issue #20 — Spells & Skill Trees. Three-PR pipeline (Phase 1 / Phase 2 / Phase 3), each phase = research → plan → implement → review → ship cycle. Plan updated 2026-05-14 for three-PR split.
-**Status:** in-progress — Phase 1 SHIPPED + APPROVED on PR #21; Phase 2 SHIPPED + REVIEWED (APPROVE) on PR #23 (stacked); Phase 2 LOW-fixup IMPLEMENTED (in `zz`), awaiting user ship + re-review.
-**Last Completed Step:** 5.2.fixup-impl (Phase 2 LOW fixup impl) — doc-comment + tamper guard + 1 smoke test applied to `guild_skills.rs`. Test count 363 → 364.
-**Current Phase:** Phase 2 — fixup ready for user to ship to existing branch `feature-20b-skill-trees`. After ship: re-reviewer dispatch, then Phase 3 planner-refresh + Cat-C pass.
+**Status:** COMPLETE (2026-05-14) — All 3 phases shipped, reviewed, fixup-cycled, and re-reviewed. 3 PRs open and APPROVE'd. User handles merge timing themselves. Closeout summary: `/Users/nousunio/Repos/Learnings/claude-code/druum/project/orchestrator/20260514-000000-feature-20-spells-skill-tree-final.md`.
+**Last Completed Step:** 5.3.fixup-review (narrow re-review addendum, Phase 3 fixup commit `f193962`). Verdict: ADDENDUM-APPROVE. Closeout summary written.
+**Current Phase:** Pipeline COMPLETE. Awaiting user-driven merge (bottom-up #21 → #23 → #24).
 
 ## Artifacts
 
 | Step | Description | Artifact                                 |
 | ---- | ----------- | ---------------------------------------- |
 | 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260514-druum-20-spells-skill-tree.md |
-| 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260514-120000-feature-20-spells-skill-tree.md (Phase 2 section: Stacked-PR protocol added 2026-05-14 ~20:00; Phase 3 Stacked-PR protocol PENDING addition) |
+| 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260514-120000-feature-20-spells-skill-tree.md (Phase 2 + Phase 3 Stacked-PR protocols added 2026-05-14) |
 | 3    | Implement (Phase 1) | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-120000-feature-20a-spell-registry.md |
 | 4    | Ship (Phase 1) | PR: https://github.com/codeinaire/druum-dungeon-crawler/pull/21, Branch: feature-20a-spell-registry, Commits: e343585 (initial) + 5708c90 (doc-only fixup) |
 | 5    | Code Review (Phase 1) | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-180000-feature-20a-spell-registry.md — base APPROVE; fixup addendum APPROVE, safe to merge |
@@ -22,12 +22,16 @@
 | 4.2  | Ship (Phase 2, STACKED) | PR: https://github.com/codeinaire/druum-dungeon-crawler/pull/23, Branch: feature-20b-skill-trees, Commit: 1ec43e8 (gate-pass fixes folded in: progression.rs current_xp 250→200, unused DerivedStats, doc list restructure, two query-type aliases). Base: feature-20a-spell-registry (stacked). |
 | 5.2  | Code Review (Phase 2) | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md — APPROVE; 0 CRITICAL/0 HIGH/0 MEDIUM/2 LOW (cosmetic: node_depth cycle-guard doc, node_state tampered-save SP-insufficient cosmetic). Posted to PR #23. |
 | 5.2.fixup-impl | Phase 2 LOW fixup impl | COMPLETE — `src/plugins/town/guild_skills.rs` only file modified. Fix A: lines 160-170 `# Precondition` doc on `sorted_nodes`. Fix B: lines 114-125 `invariant_ok` tamper guard in `node_state` `Err(SkillError::Insufficient)` arm. Optional smoke test added at lines 578-591 (`node_state_returns_locked_when_invariant_violated`). Test count 363 → 364. LOC +~26. Summary: /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-210000-feature-20b-review-fixup.md. Commit msg: /Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20b-fixup-commit-msg.txt. |
-| 5.2.fixup-ship | Phase 2 LOW fixup ship | pending — user-driven: `but rub zz feature-20b-skill-trees` + `but commit --message-file <path>` + `btp feature-20b-skill-trees`. Appends to existing PR #23. |
-| 5.2.fixup-review | Targeted re-review of Phase 2 fixup | pending — narrow scope: verify `guild_skills.rs:160-170` (LOW #1 doc) and `guild_skills.rs:114-125` (LOW #2 tamper guard) only. Append addendum to `project/reviews/20260514-200000-feature-20b-skill-trees.md`. |
-| 2.3  | Plan refresh (Phase 3) | pending — verify Phase 3 plan section holds, add "Stacked-PR protocol for Phase 3" subsection (branch from `feature-20b-skill-trees`, `gh pr create --base feature-20b-skill-trees`), surface any new Cat-C questions in one batch. |
-| 3.3  | Implement (Phase 3) | pending — gated on user go/no-go after Phase 2 fixup re-review + Phase 3 plan refresh |
-| 4.3  | Ship (Phase 3) | pending — branch `feature-20c-spell-menu` (stacked on `feature-20b-skill-trees`) |
-| 5.3  | Code Review (Phase 3) | pending |
+| 5.2.fixup-ship | Phase 2 LOW fixup ship | COMPLETE — Commit `e210cf4` pushed to `feature-20b-skill-trees`, live on PR #23. Gates all green (cargo check, cargo test --lib 364/364, cargo clippy --all-targets -- -D warnings). Subject: `docs(town): address review findings (#23) — node_depth precondition + tamper guard`. |
+| 5.2.fixup-review | Targeted re-review of Phase 2 fixup | COMPLETE — addendum appended at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md:172+`. Verdict: ADDENDUM-APPROVE. Both LOW findings RESOLVED. Smoke test correctly exercises tamper-guard path (make_exp(1,5,3): unspent=5 > total=3). No regressions. Queued for user posting to PR #23 via `gh pr review 23 --comment --body-file <addendum-extract>`. |
+| 2.3  | Plan refresh (Phase 3) | COMPLETE — Cat-C-4/5/6 user-locked decisions inlined into plan Step 2.6 (lines 543, 547, 548). Cat-C-4 = A (paint "(no castable spells)", don't pop). Cat-C-5 = A (pre-check SingleEnemy at Confirm, mirror Attack guard at `turn_manager.rs:475-478,489-492`, log + stay). Cat-C-6 = A (non-wrap saturating, consistent with Main + Guild Skills). |
+| 3.3  | Implement (Phase 3) | COMPLETE 2026-05-14 — implementer summary: `/Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-180000-feature-20c-spell-menu.md`. Files modified (exact match to plan): `src/plugins/combat/ui_combat.rs` (~+150 LOC + new `silence_blocks_real_spell_menu` test), `src/plugins/combat/turn_manager.rs` (+1 line: `pub spell_cursor: usize` field on `PlayerInputState` at line 159), `src/plugins/party/mod.rs` (~+12 LOC dev-party `KnownSpells` defaults). Cat-C-4/5/6 all implemented per spec. Δ Cargo.toml = 0 confirmed. One implementation note: SpellMenuState enum extracted outside egui closure to dodge multi-borrow on `ResMut<WarnedMissingSpells>` + `Query<&KnownSpells>` — semantics identical. Plan checkboxes 2.6 + 2.7 flipped to `[x]`. |
+| 4.3  | Ship (Phase 3, STACKED) | PR: https://github.com/codeinaire/druum-dungeon-crawler/pull/24, Branch: feature-20c-spell-menu, Commit: 9465fb2 (gate-pass fixes folded in: encounter.rs:597 + enemy_render.rs:723 init_asset::<SpellDb>() additions, same pattern as Phase 1's ai.rs fix). Base: feature-20b-skill-trees (stacked). Three-PR chain: #21 ← #23 ← #24. Gates all green (cargo check both variants, cargo test --lib 365/365 default + 369/369 dev, cargo test --test '*' 8/8, cargo clippy --all-targets -- -D warnings both variants). |
+| 5.3  | Code Review (Phase 3) | COMPLETE 2026-05-14 — /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-210000-feature-20c-spell-menu.md. Verdict: APPROVE. 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW (cosmetic doc-comment only: `spell_cursor` not reset on Cancel at ui_combat.rs:471-478, defensive future-proofing). All 7 focus areas verified correct. Borrow-checker deviation (SpellMenuState extraction) accepted as semantics-identical structural improvement. Review body POSTED to PR #24 by user (1 review comment live). |
+| 5.3.fixup-impl | Phase 3 LOW fixup impl | COMPLETE 2026-05-14 ~22:00 — `src/plugins/combat/ui_combat.rs` only file modified. Single change: lines 470-472 — replaced one-line `// Cancel: pop submenu (top-of-stack only; Main does nothing).` with a 3-line block adding `NOTE: spell_cursor is reset on *entry* to SpellMenu (Main arm case 2, line 532), not on exit. Any future code that pushes SpellMenu directly must reset it.` Line 532 reference verified accurate before applying. LOC +2. No code changes, no test changes — test count unchanged at 365/365 lib + 369/369 dev + 8/8 integration. Summary: /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-220000-feature-20c-review-fixup.md. Commit msg: /Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20c-fixup-commit-msg.txt. Subject: `docs(combat): address review findings (#24) — spell_cursor reset path comment`. |
+| 5.3.fixup-ship | Phase 3 LOW fixup ship | COMPLETE 2026-05-14 — Commit `f193962` pushed to `feature-20c-spell-menu`, live on PR #24. Gates all green (cargo check, cargo test --lib 365/365, cargo clippy --all-targets -- -D warnings). |
+| 5.3.fixup-review | Targeted re-review of Phase 3 fixup | COMPLETE 2026-05-14 — addendum appended to `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-210000-feature-20c-spell-menu.md`. Verdict: ADDENDUM-APPROVE — 0 open findings. Comment-only change at `ui_combat.rs:471-472` correctly resolves the LOW; line 532 reference verified accurate; regression impossible from comment change. Addendum body queued at `/tmp/pr24-fixup-addendum.md` for user posting via `gh pr review 24 --comment --body-file /tmp/pr24-fixup-addendum.md`. |
+| 6   | Closeout summary | COMPLETE 2026-05-14 — `/Users/nousunio/Repos/Learnings/druum/project/orchestrator/20260514-000000-feature-20-spells-skill-tree-final.md` (note: actual path is `/Users/nousunio/Repos/Learnings/claude-code/druum/project/orchestrator/20260514-000000-feature-20-spells-skill-tree-final.md`). All sections per closeout brief: TL;DR, phase log, gate matrix, Cat-C ledger, fixup cycles, memory entries, open follow-ups, merge guidance, artifact links. |
 
 ## User Decisions
 
@@ -49,7 +53,6 @@ All Phase-1-locked decisions retained (see plan §"User Decisions"):
 - **Phase 2 PR shape:** STACKED — Phase 2 branches from `feature-20a-spell-registry`, `gh pr create --base feature-20a-spell-registry`. When PR #21 merges, GitHub auto-retargets Phase 2's base to main.
 - **Phase 3 stacking:** Now CONFIRMED — Option A stack on Phase 2 (`feature-20b-skill-trees`).
 - **Issue #22:** Already filed by user for `apply_poison_damage` + `apply_regen` widening carry-forward — https://github.com/codeinaire/druum-dungeon-crawler/issues/22.
-- **Re-review scope:** Narrow — verify only the two doc-fixup sites; no full re-review. COMPLETE — both resolved.
 
 ### Phase 2 plan-delta decisions (2026-05-14, post-Cat-C-resolution)
 
@@ -59,14 +62,14 @@ All Phase-1-locked decisions retained (see plan §"User Decisions"):
 ### Phase 2 plan-delta Cat-A fixes (2026-05-14)
 
 1. **`WarnedMissingSpells` key-shape fix.** `HashSet<SpellId>` → `HashSet<(SpellId, Entity)>` to match user's Q9 decision "warn-once-per-(spell, character)". Plan §Step 2.1 + §Step 2.6 (Phase 3 painter) updated.
-2. **Execution-order block added at top of Phase 2 part A.** Step *numbers* preserved for traceability, but execution order is now: 3.1 → 3.2 → 2.1 → 2.2 → 2.3 → 2.4 → 2.5 → 3.3 → 3.4 → 3.5 → 3.6 → 3.7 → 3.8 → 3.9. Each step now compiles green at its own commit. Required because Step 2.1's `can_unlock_node(node: &SkillNode, ...)` and Step 2.3's `PartyMemberBundle.unlocked_nodes: UnlockedNodes` reference types defined in 3.1.
-3. **Stacked-PR rebase discipline subsection added to Phase 2 part A** (adjacent to existing top-of-Phase-2-stacked-PR-protocol block). 6-step rebase procedure (`git fetch origin` → `but status` → rebase → re-run gates → `btp` → `gh pr create --base feature-20a-spell-registry`).
+2. **Execution-order block added at top of Phase 2 part A.** Each step now compiles green at its own commit.
+3. **Stacked-PR rebase discipline subsection added to Phase 2 part A.**
 
 ### Phase 2 dispatch decisions (2026-05-14, post-implementer-go-ahead)
 
 - **User-driven ship protocol (same as Phase 1):** Implementer STOPS at the Phase 2 verification gate. User runs gates manually + creates `feature-20b-skill-trees` branch via `but branch new` + `but rub zz feature-20b-skill-trees` + `but commit` + `btp` + `gh pr create --base feature-20a-spell-registry`. Orchestrator does NOT run `run-shipper` after Phase 2 implementer completes.
 - **Working tree state during Phase 2 implementation:** All changes accumulate in `zz` (unassigned) on `gitbutler/workspace`. No branch creation, no commits, no pushes. The branch is created at ship time by the user.
-- **Live-test landmine briefed to implementer:** `tests/dungeon_movement.rs:146-154` and `tests/dungeon_geometry.rs:150-158` are the canonical `DungeonAssets` fixtures. When Step 3.4 adds `fighter_skills`/`mage_skills`/`priest_skills` `Handle<SkillTree>` fields to `DungeonAssets`, BOTH fixtures must be updated with `<field>: Handle::default()` lines, OR the `--test` build will fail with "missing field" errors. This is the same trap that hit Phase 1's `spell_table` → `spells` rename.
+- **Live-test landmine briefed to implementer:** `tests/dungeon_movement.rs:146-154` and `tests/dungeon_geometry.rs:150-158` are the canonical `DungeonAssets` fixtures.
 
 ### Phase 2 post-review decisions (2026-05-14, post-APPROVE-verdict)
 
@@ -76,122 +79,153 @@ All Phase-1-locked decisions retained (see plan §"User Decisions"):
 - **Phase 2 fixup re-review scope:** Narrow — verify the two LOW sites only. Append addendum to existing review file at `project/reviews/20260514-200000-feature-20b-skill-trees.md`. Do NOT re-review the base Phase 2 commit. COMPLETE 2026-05-14 — ADDENDUM-APPROVE.
 - **Phase 3 stacking confirmed:** Option A — stack on Phase 2 / `feature-20b-skill-trees`. Plan must gain "Stacked-PR protocol for Phase 3" subsection mirroring Phase 2's. Three-PR stack: #21 ← #23 ← #(Phase 3).
 
+### Phase 3 Cat-C decisions (2026-05-14, user-locked pre-implementation)
+
+- **Cat-C-4 (empty KnownSpells path):** Option A — paint "(no castable spells)" or "(no spells)", do NOT auto-pop.
+- **Cat-C-5 (SingleEnemy guard):** Option A — pre-check at Confirm mirroring Attack guard at `turn_manager.rs:475-478,489-492`, log + stay in SpellMenu on no valid targets.
+- **Cat-C-6 (cursor wrap):** Option A — non-wrap saturating, consistent with Main + Guild Skills.
+
+### Phase 3 post-review decisions (2026-05-14)
+
+- **Decision 1 — Review posting:** USER POSTED `/tmp/pr24-review-body.md` to PR #24 via `gh pr review 24 --comment --body-file <path>`. PR #24 now has 1 review comment.
+- **Decision 2 — LOW fixup:** YES — same protocol as Phase 1/2. User wants the fixup despite orchestrator's "skip is also valid" framing. Consistent across all three phases of #20.
+- **Decision 3 — Merge order:** User will handle merge timing themselves. NO auto-merge. After fixup cycle completes, orchestrator proceeds to closeout (`write-orchestrator-summary`) and leaves all three PRs open for user-driven merging. Bottom-up recommendation (#21 → #23 → #24) noted as guidance.
+
 ### GitButler stacked-branch discovery (2026-05-14, Phase 2 ship friction)
 
 - **`but commit <new-branch-name>` does NOT auto-create branches** in the current `but` version — errors with `Branch '<name>' not found`. To stack: MUST use `but branch new <name> --anchor <parent>` FIRST. The CLAUDE.md guidance saying "creates a NEW branch with that name and route the commit there" is OUTDATED.
-- **Phase 3 implication:** branch creation MUST be `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging. The plan's Phase 3 "Stacked-PR protocol" subsection (pending addition) must encode this.
-- **Memory note to save:** as feedback memory under slug `druum-gitbutler-stacked-branch-creation` after Phase 3 ships, or earlier if user requests.
+- **Phase 3 implication:** branch creation MUST be `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging. (Already applied in Phase 3 ship.)
+- **Memory note to save:** as feedback memory under slug `druum-gitbutler-stacked-branch-creation` after Phase 3 ships.
 
 ## Phase 1 ship details (2026-05-14)
 
 - **Branch:** `feature-20a-spell-registry` from `main`
 - **Initial commit:** `e343585`
-- **Fixup commit:** `5708c90` (docs(combat): address review findings (#21) — MP-check invariant + TODO(#22) markers)
+- **Fixup commit:** `5708c90`
 - **PR:** https://github.com/codeinaire/druum-dungeon-crawler/pull/21
 - **Files changed (initial):** 23
-- **Files changed (fixup):** 2 (`turn_manager.rs`, `status_effects.rs`) — comments-only
+- **Files changed (fixup):** 2 — comments-only
 - **Fixup gates:** cargo check / cargo clippy --all-targets -- -D warnings / cargo test --lib 339/339 — all green
-- **GitHub PR number is 21 but feature/issue number is #20 Phase 1 (the "20a" suffix). PR #20 was merged feature #19. Roadmap is source of truth.**
 
 ## Phase 1 fixup-impl details (2026-05-14)
 
-- **Fix A (MEDIUM):** `src/plugins/combat/turn_manager.rs:593-600` — 8-line invariant comment above the MP-check block in CastSpell arm. Explains snapshot-vs-live split, one-action-per-round invariant, and migration path (`derived_mut.get(actor)`) for future double-cast mechanics.
-- **Fix B (LOW):** `src/plugins/combat/status_effects.rs:319-320` and `347-348` — `// TODO(#22): widen to Or<(With<PartyMember>, With<Enemy>)> when Phase 2 adds combat-round StatusTickEvent emitter for enemies — see PR #21 review.` above each of `apply_poison_damage` and `apply_regen`.
+- **Fix A (MEDIUM):** `src/plugins/combat/turn_manager.rs:593-600` — 8-line invariant comment above the MP-check block in CastSpell arm.
+- **Fix B (LOW):** `src/plugins/combat/status_effects.rs:319-320` and `347-348` — TODO(#22) markers.
 - **Commit message file:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20a-fixup-commit-msg.txt`
-- **No code changes, no new tests, no other files touched.**
 
 ## Phase 2 stacked-PR protocol (added to plan 2026-05-14 ~20:00)
 
-Plan §Phase 2 now includes "Stacked-PR protocol" subsection at the end of the Phase 2 boundary block. Key rules:
-
+Plan §Phase 2 now includes "Stacked-PR protocol" subsection. Key rules:
 - Branch from `feature-20a-spell-registry`, NOT from `main`
-- Verify with `but status` BEFORE creating branch — Phase 1 must be the only branch with applied commits
 - `gh pr create --base feature-20a-spell-registry --head feature-20b-skill-trees`
 - Auto-retarget on Phase 1 merge — no manual action
 - Rebase discipline: if Phase 1 receives further fixups, Phase 2 must be rebased before push
 - Phase 3 stacking — CONFIRMED, stack on Phase 2 / `feature-20b-skill-trees`.
 
-## Phase 2 LOW fixup-impl details (2026-05-14 ~21:00)
+## Phase 2 LOW fixup details (2026-05-14 ~21:00)
 
 - **File modified:** `src/plugins/town/guild_skills.rs` ONLY
-- **Fix A (LOW #1):** Lines 160-170 — `# Precondition` rustdoc H1 section added to `sorted_nodes` doc-comment. States acyclic-tree precondition, references `validate_no_cycles` + `validate_skill_trees_on_load` + production call-site guard pattern, recommends test fixture authors use validators first.
-- **Fix B (LOW #2):** Lines 114-125 — `invariant_ok` bool binding added inside `Err(SkillError::Insufficient)` arm of `node_state`. Three-condition guard: `if prereqs_met && level_met && invariant_ok { SpInsufficient } else { Locked(Insufficient) }`. Tampered-save case (`unspent > total_earned`) now shows `Locked` not yellow.
-- **Optional smoke test added:** Lines 582-591 — `node_state_returns_locked_when_invariant_violated`. Uses `make_exp(1, 5, 3)`. Test count 363 → 364.
-- **LOC delta:** +~26 lines total.
-- **Implementation summary:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-210000-feature-20b-review-fixup.md`
-- **Commit message file:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20b-fixup-commit-msg.txt`
-- **Co-author trailer:** `Claude Opus 4.7 (1M context) <noreply@anthropic.com>` (matches Phase 1 fixup's exact spelling)
-- **No code changes outside the two sites.** No other files touched.
+- **Fix A (LOW #1):** Lines 160-170 — `# Precondition` rustdoc H1 section added to `sorted_nodes`.
+- **Fix B (LOW #2):** Lines 114-125 — `invariant_ok` bool binding added inside `Err(SkillError::Insufficient)` arm of `node_state`.
+- **Optional smoke test added:** Lines 582-591 — `node_state_returns_locked_when_invariant_violated`. Test count 363 → 364.
 - **Ship commit:** `e210cf4` pushed 2026-05-14, live on PR #23.
 
 ## Phase 2 LOW fixup-review details (2026-05-14 ~22:00)
 
 - **Verdict:** ADDENDUM-APPROVE
-- **LOW #1 resolution:** Fully resolved. `# Precondition` section at lines 162-170 matches spec verbatim — names `validate_no_cycles`, `validate_skill_trees_on_load`, production call-site guard pattern, fixture-author advisory. No code change to `node_depth`.
-- **LOW #2 resolution:** Fully resolved. `invariant_ok` binding + three-condition `if prereqs_met && level_met && invariant_ok` guard at lines 118-124 match spec exactly. Normal saves unaffected; tampered saves now return `Locked` instead of yellow `SpInsufficient`.
-- **Smoke test verification:** `node_state_returns_locked_when_invariant_violated` (lines 582-591) correctly constructed. `make_exp(1, 5, 3)` produces `unspent=5 > total=3`. Node satisfies prereqs + level, so only gate is new `invariant_ok` check. Assertion is `Locked(SkillError::Insufficient)` — specifically exercises new path. Pre-existing SP-short test still passes `SpInsufficient` (no regression). Test count 363 → 364.
-- **Regression check:** None. Fixup touches only doc-comment + additive guard. `invariant_ok=true` in all non-tampered states. No imports or signature changes.
-- **Deviations from spec:** None. Both fixes verbatim implementations of spec.
-- **Addendum location:** Appended to `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md` at line 172+. Per task instructions, user handles `gh pr review 23 --comment` posting.
+- **Both LOW findings:** Fully resolved.
+- **Addendum location:** Appended to `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md` at line 172+.
 
-## Phase 1 implementer deviations (carry forward to Phase 2 reviewer)
+## Phase 3 ship details (2026-05-14)
 
-1. Crit chance uses `accuracy / 5`% not `luck / 5`% — DerivedStats has no luck field.
-2. `CombatantCharsQuery` uses `&'static mut StatusEffects` (B0002 prevention).
-3. Revive bypasses `resolve_target_with_fallback` — that helper filters dead entities; Revive reads `action.target` directly with defense-in-depth `is_dead` check.
-4. Cast announcement log fires BEFORE per-target effect logs (game-feel).
-5. Four `DungeonAssets` test fixtures updated for `spell_table` → `spells` field rename.
-6. **Targeted fix #1 (2026-05-14 follow-up):** `execute_combat_actions` param count exceeded Bevy's 16-tuple `SystemParam` ceiling (was 18). Three Phase-1 spell params (`spell_db_assets`, `spell_handle`, `equip_changed`) collapsed into private `#[derive(SystemParam)] struct SpellCastParams<'w>` in `turn_manager.rs`. Param count now 16 (at ceiling). Added `mut` to `chars: CombatantCharsQuery` for the Revive arm's `chars.get_mut(target)` call. (Note: user later found the actual root cause was a missing `use bevy::ecs::system::SystemParam;` import in `turn_manager.rs` — the bundle is still architecturally correct but the original cascade was the missing import.)
+- **Branch:** `feature-20c-spell-menu` (stacked on `feature-20b-skill-trees` via `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees`)
+- **Initial commit:** `9465fb2`
+- **PR:** https://github.com/codeinaire/druum-dungeon-crawler/pull/24
+- **Base:** `feature-20b-skill-trees` (PR #23) — three-PR chain #21 ← #23 ← #24
+- **Files changed:** 5 (ui_combat.rs ~+150 LOC, turn_manager.rs +1 line, party/mod.rs ~+12 LOC, encounter.rs +1 line init_asset, enemy_render.rs +1 line init_asset)
+- **Gates verified by user:** cargo check both variants ✓, cargo test --lib 365/365 default + 369/369 dev ✓, cargo test --test '*' 8/8 ✓, cargo clippy --all-targets -- -D warnings both variants ✓
+- **Gate-pass fixes folded into commit `9465fb2`:** `encounter.rs:597` + `enemy_render.rs:723` `init_asset::<SpellDb>()` additions (same pattern as Phase 1's ai.rs fix — `handle_combat_input` system now requires `Res<Assets<SpellDb>>`).
+- **One accepted deviation:** `SpellMenuState` enum extracted outside `egui::Window::show` closure (`ui_combat.rs:285-345` builds, `:351-389` renders). Borrow checker forced — `ResMut<WarnedMissingSpells>` + `Query<&KnownSpells>` cannot both cross `FnOnce` boundary. Semantics identical, code cleaner. Documented in implementer summary lines 53-63.
 
-## User-applied follow-up fixes incorporated into commit e343585
+## Phase 3 review verdict (2026-05-14)
 
-1. Added `use bevy::ecs::system::SystemParam;` to `src/plugins/combat/turn_manager.rs:48` (real root cause of "fn isn't IntoSystemSet" cascade — the derive macro path is NOT in `bevy::prelude::*`).
-2. Added `app.init_asset::<crate::data::SpellDb>();` to `src/plugins/combat/ai.rs:188`'s `make_test_app` (3 AI tests panicked because `Res<Assets<SpellDb>>` was unregistered).
-3. Renamed `spell_table: Handle::default()` → `spells: Handle::default()` in `tests/dungeon_movement.rs:153` and `tests/dungeon_geometry.rs:157`.
-4. Status-effect filter widening (`status_effects.rs:178-181` and `status_effects.rs:243-247`) — `Or<(With<PartyMember>, With<Enemy>)>` per Option-A.
-5. `CombatantStatusQuery` type alias added to `status_effects.rs` for clippy compliance.
+- **Verdict:** APPROVE — mergeable as-is. 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW.
+- **LOW (cosmetic, `ui_combat.rs:471-478`):** Cancel pops `SpellMenu` without resetting `spell_cursor`. Not a bug — entry always resets via Main arm case 2 (line 532). Future-proofing comment recommended. POSTED to PR #24 (review body via `gh pr review 24 --comment --body-file`).
+- **All 7 focus areas verified correct:**
+  1. Silence gate preservation — both existing + new sibling tests assert real menu behavior.
+  2. `WarnedMissingSpells` warn-once semantics — `(SpellId, Entity)` tuple, `.set.insert(...)` at painter:318 + handler:636 only.
+  3. Cat-C-4 dual empty-state painter — `Empty` vs `NoCastable`, distinct messages, neither auto-pops.
+  4. Cat-C-5 SingleEnemy guard — live `enemies` query, log-and-stay on empty, mirrors Attack guard.
+  5. Cat-C-6 saturating cursor — `(cursor + 1).min(castable.len().saturating_sub(1))` correct, entry-reset on Main case 2.
+  6. Borrow-checker deviation — accepted as semantics-identical structural improvement (owned-data enum before closure).
+  7. Dev-party defaults — `halito` + `katino` (Mage), `dios` + `matu` (Priest), `[]` (Fighter), all IDs verified against `core.spells.ron`.
 
-## Reviewer focus areas for Phase 2 (forward-looking, set by Phase 1)
+## Phase 3 LOW fixup-impl details (2026-05-14 ~22:00)
 
-When Phase 2 implementer completes, reviewer should pay particular attention to:
+- **File modified:** `src/plugins/combat/ui_combat.rs` ONLY
+- **Single change:** Lines 470-472 — replaced one-line existing comment with 3-line block adding `NOTE: spell_cursor is reset on *entry* to SpellMenu (Main arm case 2, line 532), not on exit. Any future code that pushes SpellMenu directly must reset it.` Verbatim from reviewer's LOW suggestion.
+- **Line 532 verification:** Confirmed accurate before applying — `input_state.spell_cursor = 0;` is at `ui_combat.rs:532` inside Main arm `2 =>` (Spell) case.
+- **LOC:** +2 lines (comment-only)
+- **Test count:** Unchanged — 365/365 lib + 369/369 dev-party + 8/8 integration.
+- **Commit message file:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20c-fixup-commit-msg.txt`
+- **Implementation summary:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-220000-feature-20c-review-fixup.md`
+- **Ship status:** PAUSED — awaiting user-driven gates + `but rub zz feature-20c-spell-menu` + `but commit --message-file project/shipper/feature-20c-fixup-commit-msg.txt` + `btp feature-20c-spell-menu` to append to PR #24 (no new branch, no new PR).
 
-1. **Save-format stability** — appended `unspent_skill_points` + `total_skill_points_earned` to `Experience` must use `#[serde(default)]` (per #19 character-creation precedent). Verify no field reordering or discriminant changes.
-2. **DAG validation (`validate_no_cycles`) on RON load** — Kahn's algorithm must fail-fast with `error!` log and produce an empty tree on cycle; do NOT panic. The `OnExit(GameState::Loading)` validation system is the place to run it.
-3. **`KnownSpells` populates but is not yet consumed** — Phase 2 must NOT touch combat code. The SpellMenu stub remains. Verify no `turn_manager.rs` / `ui_combat.rs` modifications leak into Phase 2.
-4. **Guild "Skills" mode placement** — should be a sibling to `guild_create.rs` (#19), not a special case inside `guild.rs`. Verify file separation discipline.
-5. **`apply_poison_damage` + `apply_regen` widening** — does Phase 2's StatusTickEvent (if introduced for enemies) trigger #22 resolution? If yes, widen the queries. If Phase 2 does NOT introduce combat-round status ticks, the TODO(#22) markers remain valid.
+## Phase 1 implementer deviations (carry-forward documented)
 
-## Phase 2 post-review state (2026-05-14)
+1. Crit chance uses `accuracy / 5`% not `luck / 5`%.
+2. `CombatantCharsQuery` uses `&'static mut StatusEffects`.
+3. Revive bypasses `resolve_target_with_fallback`.
+4. Cast announcement log fires BEFORE per-target effect logs.
+5. Four `DungeonAssets` test fixtures updated.
+6. Targeted fix #1: `SpellCastParams<'w>` struct + missing `SystemParam` import.
 
-- **Verdict:** APPROVE — mergeable as-is. 0 CRITICAL / 0 HIGH / 0 MEDIUM / 2 LOW.
-- **LOW #1 (`guild_skills.rs:136-157`):** `node_depth` recursion has no in-flight cycle guard. Production-safe (two-layer defence: `validate_skill_trees_on_load` empties cyclic trees + both callers check `tree.nodes.is_empty()`). Future-footgun risk if a test constructs a cyclic tree directly. Fix = doc-comment-only `# Precondition` note on `sorted_nodes`. **APPLIED in fixup (lines 160-170). RE-REVIEW PASS.**
-- **LOW #2 (`guild_skills.rs:114-123`):** `node_state` returns yellow `SpInsufficient` for tampered-save case (`unspent > total_earned`) instead of `Locked`. Unlock handler still rejects correctly; visual-only discrepancy on an unsupported tampered-save path. Fix = add `invariant_ok = unspent <= total_earned` to the yellow re-check arm. **APPLIED in fixup (lines 114-125). RE-REVIEW PASS.**
-- **GitHub posting:** Both PR #21 and PR #23 review bodies posted to GitHub by user. Fixup addendum NOT YET posted — queued for user.
-- **Deviations review (all 5):** All accepted — no fix-up required.
+## Reviewer focus areas for Phase 3 (already executed)
+
+All 7 priority areas verified. See Phase 3 review at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-210000-feature-20c-spell-menu.md`.
 
 ## Resume instructions
 
-### Next user-facing action (PAUSED here — handing back for Phase 3 confirmation)
+### Next user-facing action (PAUSED here — Phase 3 LOW fixup impl COMPLETE)
 
-Phase 2 fixup re-review COMPLETE (ADDENDUM-APPROVE). User to:
+User to run Phase 3 fixup ship steps (mirrors Phase 1 + Phase 2 fixup ship protocol):
 
-1. **Post fixup addendum to PR #23** via `gh pr review 23 --comment --body-file <addendum extract>`. Addendum text is at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md` lines 172-219.
-2. **Review Phase 3 plan delta + Cat-C questions** (orchestrator pauses with these batched).
-3. **Confirm go/no-go on Phase 3 implementer dispatch.**
+1. **Gates** (expect all green — comment-only change, test count unchanged):
+   ```
+   cargo check
+   cargo check --features dev-party
+   cargo test --lib                                       # expect 365/365
+   cargo test --lib --features dev-party                  # expect 369/369
+   cargo test --test '*'                                  # expect 8/8
+   cargo clippy --all-targets -- -D warnings
+   cargo clippy --all-targets --features dev-party -- -D warnings
+   ```
 
-### After user go-ahead — orchestrator resumes Phase 3 with:
+2. **Stage + commit + push** (append to existing branch — no new branch, no new PR):
+   ```
+   but rub zz feature-20c-spell-menu
+   but commit --message-file project/shipper/feature-20c-fixup-commit-msg.txt
+   btp feature-20c-spell-menu
+   ```
 
-1. **Phase 3 implementer dispatch.** Pass plan path + user-driven-ship protocol + GitButler stacked-branch creation note (`but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging; `but commit <new-branch>` does NOT auto-create).
-2. **Phase 3 user-driven ship** — same as Phase 1 + Phase 2 ship. Implementer stops at gate. User runs branch creation + stage + commit + push + `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu`.
-3. **Phase 3 review** — `run-reviewer` with Phase 3 focus areas (SpellMenu integration, MP consumption, target selection, Q9 warn-once mechanism, dev-party defaults gating, MenuAction wiring).
+   This appends the fixup commit to existing PR #24.
 
-### Phase 3 dispatch checklist (when user confirms)
+### After ship — orchestrator resumes:
 
-1. Confirm stacking: CONFIRMED — stack on Phase 2 / `feature-20b-skill-trees`.
-2. Re-read Phase 3 section of `project/plans/20260514-120000-feature-20-spells-skill-tree.md`.
-3. Plan updated with "Stacked-PR protocol for Phase 3" subsection (branch from `feature-20b-skill-trees` via `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees`, `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu`, rebase discipline if upstream PRs receive fixups). PENDING.
-4. Run planner narrowly scoped — verify Phase 3 section holds against Phase 2's actual ship, resolve new Cat-C questions if any, confirm concrete file lists + test counts.
-5. Pause for user. Show: fixup re-review verdict + Phase 3 plan delta + Cat-C questions.
-6. On go-ahead: dispatch `run-implementer` with plan path + user-driven-ship protocol + DungeonAssets fan-out reminder + WarnedMissingSpells key-shape reminder + stacked-branch creation note.
-7. Same user-driven ship protocol as Phase 1 + 2 — implementer STOPS at verification gate; user creates `feature-20c-spell-menu` branch + ships.
-8. Same review focus protocol — orchestrator dispatches `run-reviewer` with Phase 3 focus areas (SpellMenu integration, MP consumption, target selection, known-but-not-validated spell IDs, Q9 warn-once mechanism).
+- **Narrow re-review:** Append addendum to existing Phase 3 review file at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-210000-feature-20c-spell-menu.md` (DO NOT create new file). Verify the LOW finding at `ui_combat.rs:471-478` is resolved. Base commit `9465fb2` already approved — do NOT re-review unchanged code. Queue addendum body at `/tmp/pr24-fixup-addendum.md` for user to post.
+- **Feature #20 closeout:** Run `write-orchestrator-summary` to produce final closeout summary at `project/orchestrator/<dated>-feature-20-spells-skill-tree-final.md`. Include: all 3 phases shipped (PR #21, #23, #24), all fixup cycles documented, final test counts (365 lib + 8 integration), Δ Cargo.toml = 0 across all phases, all Cat-C decisions resolved (8 total), memory entries created, Issue #22 as open follow-up, merge order recommendation (bottom-up #21 → #23 → #24, user handles timing).
+- **Mark pipeline COMPLETE** in this state file.
+- **Hand back to user** with: closeout summary path, final test count + gate matrix, merge guidance reminder, open follow-ups.
+- **Do NOT auto-merge anything.**
+
+### Merge order rationale (bottom-up #21 → #23 → #24)
+
+Standard for stacked PRs: merging the bottom of the stack first causes GitHub to auto-retarget the next PR's base to `main`. Merging top-down would leave the lower PRs with rebased histories that don't match `main`.
+
+1. Merge PR #21 (Phase 1 — spell registry). #23 auto-retargets to `main`.
+2. Merge PR #23 (Phase 2 — skill trees). #24 auto-retargets to `main`.
+3. Merge PR #24 (Phase 3 — spell menu). Feature #20 complete.
+
+**User has signaled they will handle merge timing themselves — orchestrator will NOT auto-merge.**
+
+**Issue #22 caveat:** carry-forward filed by user before Phase 1 — `apply_poison_damage` + `apply_regen` query widening when combat-round status ticks are added for enemies. Phase 2 + 3 did not introduce that, so #22 remains open. Should be considered a Feature #20 follow-up.
