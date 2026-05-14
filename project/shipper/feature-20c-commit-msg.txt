@@ -1,0 +1,28 @@
+feat(combat): functional spell menu and end-to-end casting (#20c)
+
+Phase 3 of Feature #20 (Spells & Skill Trees). Replaces the
+MenuFrame::SpellMenu stub at ui_combat.rs:457-473 with a real
+two-pane menu and wires dev-party default KnownSpells.
+
+Files changed (3):
+  src/plugins/combat/ui_combat.rs   — real SpellMenu painter +
+    handler; new silence_blocks_real_spell_menu test
+  src/plugins/combat/turn_manager.rs — spell_cursor field on
+    PlayerInputState
+  src/plugins/party/mod.rs           — Mage/Priest default KnownSpells
+    in spawn_default_debug_party (#[cfg(feature = "dev")])
+
+Cat-C decisions implemented:
+  Cat-C-4 (empty castable list) = Option A: paint label, don't auto-pop.
+    Two sub-cases: "(no spells)" when KnownSpells is empty;
+    "(no castable spells)" when knows spells but all filtered or MP-short.
+  Cat-C-5 (SingleEnemy + all enemies dead) = Option A: pre-check
+    alive-enemy list at Confirm time mirroring Attack arm guard
+    (turn_manager.rs:475-478). Logs "no valid targets for {spell}" and
+    stays in SpellMenu on empty list.
+  Cat-C-6 (cursor wrap on Up/Down) = Option A: saturating non-wrap,
+    consistent with main_cursor and Guild node_cursor.
+
+Test delta: 364 → 365 (+1: silence_blocks_real_spell_menu).
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

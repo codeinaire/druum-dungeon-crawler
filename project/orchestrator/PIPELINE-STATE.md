@@ -60,7 +60,7 @@ All Phase-1-locked decisions retained (see plan §"User Decisions"):
 
 1. **`WarnedMissingSpells` key-shape fix.** `HashSet<SpellId>` → `HashSet<(SpellId, Entity)>` to match user's Q9 decision "warn-once-per-(spell, character)". Plan §Step 2.1 + §Step 2.6 (Phase 3 painter) updated.
 2. **Execution-order block added at top of Phase 2 part A.** Step *numbers* preserved for traceability, but execution order is now: 3.1 → 3.2 → 2.1 → 2.2 → 2.3 → 2.4 → 2.5 → 3.3 → 3.4 → 3.5 → 3.6 → 3.7 → 3.8 → 3.9. Each step now compiles green at its own commit. Required because Step 2.1's `can_unlock_node(node: &SkillNode, ...)` and Step 2.3's `PartyMemberBundle.unlocked_nodes: UnlockedNodes` reference types defined in 3.1.
-3. **Stacked-PR rebase discipline subsection added to Phase 2 part A** (adjacent to existing top-of-Phase-2 stacked-PR-protocol block). 6-step rebase procedure (`git fetch origin` → `but status` → rebase → re-run gates → `btp` → `gh pr create --base feature-20a-spell-registry`).
+3. **Stacked-PR rebase discipline subsection added to Phase 2 part A** (adjacent to existing top-of-Phase-2-stacked-PR-protocol block). 6-step rebase procedure (`git fetch origin` → `but status` → rebase → re-run gates → `btp` → `gh pr create --base feature-20a-spell-registry`).
 
 ### Phase 2 dispatch decisions (2026-05-14, post-implementer-go-ahead)
 
@@ -73,8 +73,14 @@ All Phase-1-locked decisions retained (see plan §"User Decisions"):
 - **Option B chosen (user, 2026-05-14):** Address Phase 2 LOW findings on existing branch first via cosmetic fixup, then dispatch Phase 3 stacked on `feature-20b-skill-trees`. Same shape as Phase 1's post-review flow.
 - **Phase 2 fixup implementer brief:** Narrow — Fix A (doc-comment on `sorted_nodes`) + Fix B (tamper-guard short-circuit in `node_state` `SpInsufficient` arm) verbatim from review file lines 99-138. Optional smoke test approved.
 - **Phase 2 fixup ship protocol:** User-driven, same as Phase 1 fixup. Implementer stops at gate. User stages with `but rub zz feature-20b-skill-trees`, commits with `--message-file`, pushes with `btp` to append to existing PR #23 (no new branch, no new PR).
-- **Phase 2 fixup re-review scope:** Narrow — verify the two LOW sites only. Append addendum to existing review file at `project/reviews/20260514-200000-feature-20b-skill-trees.md`. Do NOT re-review the base Phase 2 commit.
+- **Phase 2 fixup re-review scope:** Narrow — verify the two LOW sites only. Append addendum to existing review file at `project/reviews/20260514-200000-feature-20b-skill-trees.md`. Do NOT re-review the base Phase 2 commit. COMPLETE 2026-05-14 — ADDENDUM-APPROVE.
 - **Phase 3 stacking confirmed:** Option A — stack on Phase 2 / `feature-20b-skill-trees`. Plan must gain "Stacked-PR protocol for Phase 3" subsection mirroring Phase 2's. Three-PR stack: #21 ← #23 ← #(Phase 3).
+
+### GitButler stacked-branch discovery (2026-05-14, Phase 2 ship friction)
+
+- **`but commit <new-branch-name>` does NOT auto-create branches** in the current `but` version — errors with `Branch '<name>' not found`. To stack: MUST use `but branch new <name> --anchor <parent>` FIRST. The CLAUDE.md guidance saying "creates a NEW branch with that name and route the commit there" is OUTDATED.
+- **Phase 3 implication:** branch creation MUST be `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging. The plan's Phase 3 "Stacked-PR protocol" subsection (pending addition) must encode this.
+- **Memory note to save:** as feedback memory under slug `druum-gitbutler-stacked-branch-creation` after Phase 3 ships, or earlier if user requests.
 
 ## Phase 1 ship details (2026-05-14)
 
@@ -110,13 +116,23 @@ Plan §Phase 2 now includes "Stacked-PR protocol" subsection at the end of the P
 - **File modified:** `src/plugins/town/guild_skills.rs` ONLY
 - **Fix A (LOW #1):** Lines 160-170 — `# Precondition` rustdoc H1 section added to `sorted_nodes` doc-comment. States acyclic-tree precondition, references `validate_no_cycles` + `validate_skill_trees_on_load` + production call-site guard pattern, recommends test fixture authors use validators first.
 - **Fix B (LOW #2):** Lines 114-125 — `invariant_ok` bool binding added inside `Err(SkillError::Insufficient)` arm of `node_state`. Three-condition guard: `if prereqs_met && level_met && invariant_ok { SpInsufficient } else { Locked(Insufficient) }`. Tampered-save case (`unspent > total_earned`) now shows `Locked` not yellow.
-- **Optional smoke test added:** Lines 578-591 — `node_state_returns_locked_when_invariant_violated`. Uses `make_exp(1, 5, 3)`. Test count 363 → 364.
+- **Optional smoke test added:** Lines 582-591 — `node_state_returns_locked_when_invariant_violated`. Uses `make_exp(1, 5, 3)`. Test count 363 → 364.
 - **LOC delta:** +~26 lines total.
 - **Implementation summary:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-210000-feature-20b-review-fixup.md`
 - **Commit message file:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20b-fixup-commit-msg.txt`
 - **Co-author trailer:** `Claude Opus 4.7 (1M context) <noreply@anthropic.com>` (matches Phase 1 fixup's exact spelling)
 - **No code changes outside the two sites.** No other files touched.
-- **Gates:** NOT run by implementer (no shell access in subagent env). User to run manually before ship.
+- **Ship commit:** `e210cf4` pushed 2026-05-14, live on PR #23.
+
+## Phase 2 LOW fixup-review details (2026-05-14 ~22:00)
+
+- **Verdict:** ADDENDUM-APPROVE
+- **LOW #1 resolution:** Fully resolved. `# Precondition` section at lines 162-170 matches spec verbatim — names `validate_no_cycles`, `validate_skill_trees_on_load`, production call-site guard pattern, fixture-author advisory. No code change to `node_depth`.
+- **LOW #2 resolution:** Fully resolved. `invariant_ok` binding + three-condition `if prereqs_met && level_met && invariant_ok` guard at lines 118-124 match spec exactly. Normal saves unaffected; tampered saves now return `Locked` instead of yellow `SpInsufficient`.
+- **Smoke test verification:** `node_state_returns_locked_when_invariant_violated` (lines 582-591) correctly constructed. `make_exp(1, 5, 3)` produces `unspent=5 > total=3`. Node satisfies prereqs + level, so only gate is new `invariant_ok` check. Assertion is `Locked(SkillError::Insufficient)` — specifically exercises new path. Pre-existing SP-short test still passes `SpInsufficient` (no regression). Test count 363 → 364.
+- **Regression check:** None. Fixup touches only doc-comment + additive guard. `invariant_ok=true` in all non-tampered states. No imports or signature changes.
+- **Deviations from spec:** None. Both fixes verbatim implementations of spec.
+- **Addendum location:** Appended to `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md` at line 172+. Per task instructions, user handles `gh pr review 23 --comment` posting.
 
 ## Phase 1 implementer deviations (carry forward to Phase 2 reviewer)
 
@@ -148,44 +164,34 @@ When Phase 2 implementer completes, reviewer should pay particular attention to:
 ## Phase 2 post-review state (2026-05-14)
 
 - **Verdict:** APPROVE — mergeable as-is. 0 CRITICAL / 0 HIGH / 0 MEDIUM / 2 LOW.
-- **LOW #1 (`guild_skills.rs:136-157`):** `node_depth` recursion has no in-flight cycle guard. Production-safe (two-layer defence: `validate_skill_trees_on_load` empties cyclic trees + both callers check `tree.nodes.is_empty()`). Future-footgun risk if a test constructs a cyclic tree directly. Fix = doc-comment-only `# Precondition` note on `sorted_nodes`. **APPLIED in fixup (lines 160-170).**
-- **LOW #2 (`guild_skills.rs:114-123`):** `node_state` returns yellow `SpInsufficient` for tampered-save case (`unspent > total_earned`) instead of `Locked`. Unlock handler still rejects correctly; visual-only discrepancy on an unsupported tampered-save path. Fix = add `invariant_ok = unspent <= total_earned` to the yellow re-check arm. **APPLIED in fixup (lines 114-125).**
-- **GitHub posting:** Both PR #21 and PR #23 review bodies posted to GitHub by user.
+- **LOW #1 (`guild_skills.rs:136-157`):** `node_depth` recursion has no in-flight cycle guard. Production-safe (two-layer defence: `validate_skill_trees_on_load` empties cyclic trees + both callers check `tree.nodes.is_empty()`). Future-footgun risk if a test constructs a cyclic tree directly. Fix = doc-comment-only `# Precondition` note on `sorted_nodes`. **APPLIED in fixup (lines 160-170). RE-REVIEW PASS.**
+- **LOW #2 (`guild_skills.rs:114-123`):** `node_state` returns yellow `SpInsufficient` for tampered-save case (`unspent > total_earned`) instead of `Locked`. Unlock handler still rejects correctly; visual-only discrepancy on an unsupported tampered-save path. Fix = add `invariant_ok = unspent <= total_earned` to the yellow re-check arm. **APPLIED in fixup (lines 114-125). RE-REVIEW PASS.**
+- **GitHub posting:** Both PR #21 and PR #23 review bodies posted to GitHub by user. Fixup addendum NOT YET posted — queued for user.
 - **Deviations review (all 5):** All accepted — no fix-up required.
 
 ## Resume instructions
 
-### Next user-facing action (PAUSED here — handing back for ship)
+### Next user-facing action (PAUSED here — handing back for Phase 3 confirmation)
 
-Phase 2 LOW fixup is IMPLEMENTED in `zz`. User to run:
+Phase 2 fixup re-review COMPLETE (ADDENDUM-APPROVE). User to:
 
-1. **Gates:**
-   - `cargo check`
-   - `cargo test --lib` (expect 364)
-   - `cargo clippy --all-targets -- -D warnings`
-2. **Ship:**
-   - `but rub zz feature-20b-skill-trees`
-   - `but commit --message-file /Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20b-fixup-commit-msg.txt`
-   - `btp feature-20b-skill-trees` (or `but push -u origin feature-20b-skill-trees`)
-3. **Report back to orchestrator** with the new commit SHA on PR #23.
+1. **Post fixup addendum to PR #23** via `gh pr review 23 --comment --body-file <addendum extract>`. Addendum text is at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-200000-feature-20b-skill-trees.md` lines 172-219.
+2. **Review Phase 3 plan delta + Cat-C questions** (orchestrator pauses with these batched).
+3. **Confirm go/no-go on Phase 3 implementer dispatch.**
 
-### After ship — orchestrator resumes with:
+### After user go-ahead — orchestrator resumes Phase 3 with:
 
-1. **Narrow re-reviewer dispatch.** Pass exact prompt: verify the two LOW sites only (`guild_skills.rs:160-170` doc-comment + `guild_skills.rs:114-125` tamper guard). Append addendum to existing review file. Do NOT re-review base.
-2. **Phase 3 plan refresh.** Update plan with "Stacked-PR protocol for Phase 3" subsection. Run planner narrowly scoped to Phase 3, surface any Cat-C questions in one batch.
-3. **Pause for user go/no-go on Phase 3 implementer dispatch.** Show fixup re-review verdict + Phase 3 plan delta + Cat-C questions if any. Do NOT auto-dispatch Phase 3 implementer.
+1. **Phase 3 implementer dispatch.** Pass plan path + user-driven-ship protocol + GitButler stacked-branch creation note (`but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging; `but commit <new-branch>` does NOT auto-create).
+2. **Phase 3 user-driven ship** — same as Phase 1 + Phase 2 ship. Implementer stops at gate. User runs branch creation + stage + commit + push + `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu`.
+3. **Phase 3 review** — `run-reviewer` with Phase 3 focus areas (SpellMenu integration, MP consumption, target selection, Q9 warn-once mechanism, dev-party defaults gating, MenuAction wiring).
 
-### GitButler lesson learned (to save as memory after Phase 2 fixup ships)
-
-`but commit <new-branch-name>` does NOT auto-create the branch — it errors with "Branch not found". To stack: MUST use `but branch new <name> --anchor <parent>` FIRST. CLAUDE.md's "creates a NEW branch with that name and route the commit there" guidance is outdated. Save as feedback memory.
-
-### Phase 3 dispatch checklist (when user confirms post-fixup)
+### Phase 3 dispatch checklist (when user confirms)
 
 1. Confirm stacking: CONFIRMED — stack on Phase 2 / `feature-20b-skill-trees`.
 2. Re-read Phase 3 section of `project/plans/20260514-120000-feature-20-spells-skill-tree.md`.
-3. Update plan with "Stacked-PR protocol for Phase 3" subsection (branch from `feature-20b-skill-trees` via `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees`, `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu`, rebase discipline if upstream PRs receive fixups).
-4. Run planner narrowly scoped — verify Phase 3 section holds, resolve new Cat-C questions if any, confirm concrete file lists + test counts.
+3. Plan updated with "Stacked-PR protocol for Phase 3" subsection (branch from `feature-20b-skill-trees` via `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees`, `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu`, rebase discipline if upstream PRs receive fixups). PENDING.
+4. Run planner narrowly scoped — verify Phase 3 section holds against Phase 2's actual ship, resolve new Cat-C questions if any, confirm concrete file lists + test counts.
 5. Pause for user. Show: fixup re-review verdict + Phase 3 plan delta + Cat-C questions.
-6. On go-ahead: dispatch `run-implementer` with plan path + user-driven-ship protocol + DungeonAssets fan-out reminder + WarnedMissingSpells key-shape reminder.
+6. On go-ahead: dispatch `run-implementer` with plan path + user-driven-ship protocol + DungeonAssets fan-out reminder + WarnedMissingSpells key-shape reminder + stacked-branch creation note.
 7. Same user-driven ship protocol as Phase 1 + 2 — implementer STOPS at verification gate; user creates `feature-20c-spell-menu` branch + ships.
 8. Same review focus protocol — orchestrator dispatches `run-reviewer` with Phase 3 focus areas (SpellMenu integration, MP consumption, target selection, known-but-not-validated spell IDs, Q9 warn-once mechanism).

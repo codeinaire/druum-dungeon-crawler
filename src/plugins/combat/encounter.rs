@@ -594,6 +594,7 @@ mod app_tests {
         app.init_asset::<crate::data::DungeonFloor>();
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        app.init_asset::<crate::data::SpellDb>();
         app.init_asset::<crate::data::EncounterTable>();
         app.init_asset::<crate::data::EnemyDb>();
         // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
