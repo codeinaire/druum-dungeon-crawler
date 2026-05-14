@@ -1,0 +1,93 @@
+// Feature #20 — Priest skill tree; 8 nodes day-one (LearnSpell + StatBoost mix).
+(
+    class_id: "Priest",
+    nodes: [
+        // Root node — learn Dios (heal single ally)
+        (
+            id: "priest_heal_1",
+            display_name: "Dios",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: LearnSpell("dios"),
+            description: "Learn Dios — minor healing, single ally.",
+        ),
+        // Root node — learn Matu (attack buff, all allies)
+        (
+            id: "priest_buff_atk",
+            display_name: "Matu",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: LearnSpell("matu"),
+            description: "Learn Matu — attack buff for all allies.",
+        ),
+        // Root node — +2 PIE (priest's primary stat)
+        (
+            id: "priest_devotion",
+            display_name: "Devotion",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: StatBoost((
+                strength: 0,
+                vitality: 0,
+                intelligence: 0,
+                piety: 2,
+                agility: 0,
+                luck: 0,
+            )),
+            description: "+2 PIE.",
+        ),
+        // Requires priest_heal_1 — learn Madios (stronger heal, single ally)
+        (
+            id: "priest_heal_2",
+            display_name: "Madios",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["priest_heal_1"],
+            grant: LearnSpell("madios"),
+            description: "Learn Madios — moderate healing, single ally.",
+        ),
+        // Requires priest_buff_atk — learn Bamatu (defense buff, all allies)
+        (
+            id: "priest_buff_def",
+            display_name: "Bamatu",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["priest_buff_atk"],
+            grant: LearnSpell("bamatu"),
+            description: "Learn Bamatu — defense buff for all allies.",
+        ),
+        // Requires priest_devotion — learn Kalki (speed buff, self)
+        (
+            id: "priest_buff_spd",
+            display_name: "Kalki",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["priest_devotion"],
+            grant: LearnSpell("kalki"),
+            description: "Learn Kalki — speed boost for self.",
+        ),
+        // Requires priest_heal_2 — learn Di (revive single ally)
+        (
+            id: "priest_revive",
+            display_name: "Di",
+            cost: 2,
+            min_level: 5,
+            prerequisites: ["priest_heal_2"],
+            grant: LearnSpell("di"),
+            description: "Learn Di — revive a fallen ally.",
+        ),
+        // Requires priest_heal_2 — learn Madi (full heal all allies)
+        (
+            id: "priest_heal_3",
+            display_name: "Madi",
+            cost: 2,
+            min_level: 5,
+            prerequisites: ["priest_heal_2"],
+            grant: LearnSpell("madi"),
+            description: "Learn Madi — restore all allies to full HP.",
+        ),
+    ],
+)

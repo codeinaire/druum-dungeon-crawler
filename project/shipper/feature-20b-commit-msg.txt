@@ -1,0 +1,17 @@
+feat(party): add skill trees, skill points, and Guild Skills mode (#20b)
+
+Phase 2 of Feature #20. Adds per-class skill trees loaded from
+`assets/skills/<class>.skills.ron`, `SkillPoints` accumulation on level-up,
+per-character `UnlockedNodes` progression, `KnownSpells` populated via
+`NodeGrant::LearnSpell` unlocks, and a `GuildMode::Skills` painter +
+input handler with a 4-state palette (Unlocked / Can-unlock-now /
+SP-insufficient / Locked).
+
+Cycle detection via Kahn's algorithm at load (`validate_skill_trees_on_load`).
+Bogus `NodeGrant::LearnSpell` IDs are NOT validated at load — they flow
+into `KnownSpells` and surface in Phase 3's SpellMenu painter via the
+Q9 `WarnedMissingSpells` warn-once-per-(spell, character) mechanism.
+
+Stacks on PR #21 (#20a). 25 new tests. Δ Cargo.toml = 0.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

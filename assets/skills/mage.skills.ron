@@ -1,0 +1,93 @@
+// Feature #20 — Mage skill tree; 8 nodes day-one (LearnSpell + StatBoost mix).
+(
+    class_id: "Mage",
+    nodes: [
+        // Root node — learn Halito (basic fire damage, single enemy)
+        (
+            id: "mage_combat_1",
+            display_name: "Halito",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: LearnSpell("halito"),
+            description: "Learn Halito — minor fire magic, single foe.",
+        ),
+        // Root node — learn Katino (sleep, all enemies)
+        (
+            id: "mage_control_1",
+            display_name: "Katino",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: LearnSpell("katino"),
+            description: "Learn Katino — sleep all foes.",
+        ),
+        // Root node — +2 INT (mage's primary stat)
+        (
+            id: "mage_arcane_mind",
+            display_name: "Arcane Mind",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: StatBoost((
+                strength: 0,
+                vitality: 0,
+                intelligence: 2,
+                piety: 0,
+                agility: 0,
+                luck: 0,
+            )),
+            description: "+2 INT.",
+        ),
+        // Requires mage_combat_1 — learn Mahalito (fire damage, all enemies)
+        (
+            id: "mage_combat_2",
+            display_name: "Mahalito",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["mage_combat_1"],
+            grant: LearnSpell("mahalito"),
+            description: "Learn Mahalito — greater fire magic, all foes.",
+        ),
+        // Requires mage_control_1 — learn Dilto (silence, single enemy)
+        (
+            id: "mage_control_2",
+            display_name: "Dilto",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["mage_control_1"],
+            grant: LearnSpell("dilto"),
+            description: "Learn Dilto — silence a single foe.",
+        ),
+        // Requires mage_arcane_mind — learn Mogref (defense buff, self)
+        (
+            id: "mage_buff_self",
+            display_name: "Mogref",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["mage_arcane_mind"],
+            grant: LearnSpell("mogref"),
+            description: "Learn Mogref — temporary defense boost.",
+        ),
+        // Requires mage_control_2 — learn Lokara (paralysis, single enemy)
+        (
+            id: "mage_paralysis",
+            display_name: "Lokara",
+            cost: 2,
+            min_level: 5,
+            prerequisites: ["mage_control_2"],
+            grant: LearnSpell("lokara"),
+            description: "Learn Lokara — paralyze a single foe.",
+        ),
+        // Requires mage_combat_2 — learn Tiltowait (devastating fire, all enemies)
+        (
+            id: "mage_combat_3",
+            display_name: "Tiltowait",
+            cost: 2,
+            min_level: 7,
+            prerequisites: ["mage_combat_2"],
+            grant: LearnSpell("tiltowait"),
+            description: "Learn Tiltowait — ultimate fire magic, all foes.",
+        ),
+    ],
+)

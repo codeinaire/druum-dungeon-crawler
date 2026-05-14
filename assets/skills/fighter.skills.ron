@@ -1,0 +1,88 @@
+// Feature #20 — Fighter skill tree; 6 nodes day-one (passives + resists only).
+// Fighter has mp_per_level: 0 and no LearnSpell nodes.
+(
+    class_id: "Fighter",
+    nodes: [
+        // Root node — +2 STR
+        (
+            id: "fighter_might",
+            display_name: "Might",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: StatBoost((
+                strength: 2,
+                vitality: 0,
+                intelligence: 0,
+                piety: 0,
+                agility: 0,
+                luck: 0,
+            )),
+            description: "+2 STR.",
+        ),
+        // Root node — +2 VIT
+        (
+            id: "fighter_endurance",
+            display_name: "Endurance",
+            cost: 1,
+            min_level: 1,
+            prerequisites: [],
+            grant: StatBoost((
+                strength: 0,
+                vitality: 2,
+                intelligence: 0,
+                piety: 0,
+                agility: 0,
+                luck: 0,
+            )),
+            description: "+2 VIT.",
+        ),
+        // Requires Endurance — resist Poison
+        (
+            id: "fighter_resist_poison",
+            display_name: "Iron Gut",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["fighter_endurance"],
+            grant: Resist(Poison),
+            description: "Resist Poison.",
+        ),
+        // Requires Endurance — resist Sleep
+        (
+            id: "fighter_resist_sleep",
+            display_name: "Vigilance",
+            cost: 1,
+            min_level: 3,
+            prerequisites: ["fighter_endurance"],
+            grant: Resist(Sleep),
+            description: "Resist Sleep.",
+        ),
+        // Requires Might — +3 STR
+        (
+            id: "fighter_might_2",
+            display_name: "Might II",
+            cost: 2,
+            min_level: 5,
+            prerequisites: ["fighter_might"],
+            grant: StatBoost((
+                strength: 3,
+                vitality: 0,
+                intelligence: 0,
+                piety: 0,
+                agility: 0,
+                luck: 0,
+            )),
+            description: "+3 STR.",
+        ),
+        // Requires Vigilance — resist Paralysis
+        (
+            id: "fighter_resist_paralysis",
+            display_name: "Steel Nerve",
+            cost: 2,
+            min_level: 7,
+            prerequisites: ["fighter_resist_sleep"],
+            grant: Resist(Paralysis),
+            description: "Resist Paralysis.",
+        ),
+    ],
+)

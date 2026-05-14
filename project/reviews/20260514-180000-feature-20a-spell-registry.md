@@ -99,3 +99,27 @@ let actor_derived_snapshot = entity_snapshots
 Phase 1 is clean. The five deviations are all correct adaptations. The status-effect filter widening is safe per the writer audit. The `SpellCastParams` SystemParam bundle is architecturally sound. The RON data is well-formed and load-tested. All quality gates passed (339/339 lib tests, 343/343 with dev features, 3/3 integration tests, clippy clean).
 
 **Merge recommendation: merge as-is.** The MEDIUM finding (MP snapshot comment) does not block correctness and can be addressed in the Phase 2 PR as a carry-forward note.
+
+---
+
+## Addendum — Fixup commit `5708c90` (2026-05-14)
+
+**Scope:** Narrow re-review of `5708c90` only. Base commit `e343585` is not re-reviewed.
+
+### Finding 1 resolved — MEDIUM at `turn_manager.rs:593-600`
+
+Lines 593-600 now contain an 8-line comment block that:
+
+- Names the snapshot-vs-live split explicitly ("MP check uses the pre-round snapshot … The deduction (step 5) writes to the live `derived_mut`, not back to the snapshot").
+- States the one-action-per-round invariant ("each party member commits exactly one action per round, so the snapshot MP is always current at check time").
+- Provides the migration path for future double-cast mechanics ("this check must switch to `derived_mut.get(actor)` so the second cast sees the already-deducted MP").
+
+Comment is complete and correct. **MEDIUM resolved.**
+
+### Finding 2 resolved — LOW at `status_effects.rs:319-320` and `:347-348`
+
+`// TODO(#22):` markers are present above both `apply_poison_damage` (line 319) and `apply_regen` (line 347). Each references issue #22 and the trigger condition ("Phase 2 adds combat-round StatusTickEvent emitter for enemies") plus a back-reference to the PR #21 review. **LOW resolved.**
+
+### Fixup verdict
+
+Both findings from the base review are fully addressed. No new issues introduced. **Safe to merge.**

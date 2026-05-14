@@ -30,6 +30,7 @@ use bevy_egui::{EguiPrimaryContextPass, PrimaryEguiContext};
 pub mod gold;
 pub mod guild;
 pub mod guild_create;
+pub mod guild_skills;
 pub mod inn;
 pub mod shop;
 pub mod square;
@@ -51,6 +52,9 @@ use guild_create::{
     handle_guild_create_name_input, handle_guild_create_roll,
     paint_guild_create_allocate, paint_guild_create_class, paint_guild_create_confirm,
     paint_guild_create_name, paint_guild_create_race, paint_guild_create_roll,
+};
+use guild_skills::{
+    handle_guild_skills_input, handle_guild_skills_unlock, paint_guild_skills,
 };
 use inn::{InnState, handle_inn_rest, paint_inn};
 use shop::{ShopState, handle_shop_input, paint_shop};
@@ -133,6 +137,16 @@ impl Plugin for TownPlugin {
             |mut d: ResMut<CreationDraft>| d.reset(),
         );
 
+        // Feature #20 — reset Skills mode cursor when leaving Guild.
+        app.add_systems(
+            OnExit(TownLocation::Guild),
+            |mut gs: ResMut<GuildState>| {
+                if gs.mode == GuildMode::Skills {
+                    gs.node_cursor = 0;
+                }
+            },
+        );
+
         // Camera lifecycle.
         app.add_systems(OnEnter(GameState::Town), spawn_town_camera)
             .add_systems(OnExit(GameState::Town), despawn_town_camera);
@@ -170,6 +184,10 @@ impl Plugin for TownPlugin {
                 paint_guild_create_confirm
                     .run_if(in_state(TownLocation::Guild))
                     .run_if(in_guild_mode(GuildMode::CreateConfirm)),
+                // Feature #20 — skill tree painter (gated on GuildMode::Skills).
+                paint_guild_skills
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::Skills)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );
@@ -215,6 +233,13 @@ impl Plugin for TownPlugin {
                     .run_if(in_state(TownLocation::Guild)),
                 handle_guild_create_confirm
                     .run_if(in_state(TownLocation::Guild)),
+                // Feature #20 — skill tree input + unlock handlers (gated on Skills mode).
+                handle_guild_skills_input
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::Skills)),
+                handle_guild_skills_unlock
+                    .run_if(in_state(TownLocation::Guild))
+                    .run_if(in_guild_mode(GuildMode::Skills)),
             )
                 .distributive_run_if(in_state(GameState::Town)),
         );

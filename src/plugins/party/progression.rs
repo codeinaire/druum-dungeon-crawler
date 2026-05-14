@@ -32,6 +32,15 @@ use crate::plugins::party::character::{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Skill point constant — Feature #20
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Skill points awarded per level-up. Feature #20 (Pattern 6 of research).
+/// Mirror-declared (NOT duplicated semantically) in `src/data/skills.rs`
+/// via `pub use` to avoid a Phase 2 → Phase 3 forward dep.
+pub const SKILL_POINTS_PER_LEVEL: u32 = 1;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ProgressionRng resource
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -452,6 +461,14 @@ pub fn apply_level_up_threshold_system(
 
             exp.level = exp.level.saturating_add(1);
 
+            // Feature #20 — award skill points on level-up (Pattern 6 of research).
+            exp.unspent_skill_points = exp
+                .unspent_skill_points
+                .saturating_add(SKILL_POINTS_PER_LEVEL);
+            exp.total_skill_points_earned = exp
+                .total_skill_points_earned
+                .saturating_add(SKILL_POINTS_PER_LEVEL);
+
             // Re-derive DerivedStats and reset HP/MP to new max (level-up contract).
             let new_derived = derive_stats(&base, &[], status, exp.level);
             derived.max_hp = new_derived.max_hp;
@@ -860,6 +877,7 @@ mod tests {
                     level: 1,
                     current_xp: 120,
                     xp_to_next_level: 100,
+                    ..Default::default()
                 },
                 StatusEffects::default(),
             ))
@@ -882,6 +900,99 @@ mod tests {
         assert_eq!(
             derived.current_hp, derived.max_hp,
             "current_hp must be reset to max_hp on level-up"
+        );
+
+        // Feature #20 — level-up must award SKILL_POINTS_PER_LEVEL skill points.
+        assert_eq!(
+            exp.unspent_skill_points,
+            SKILL_POINTS_PER_LEVEL,
+            "one level-up must award SKILL_POINTS_PER_LEVEL ({}) unspent skill points",
+            SKILL_POINTS_PER_LEVEL
+        );
+        assert_eq!(
+            exp.total_skill_points_earned,
+            SKILL_POINTS_PER_LEVEL,
+            "one level-up must award SKILL_POINTS_PER_LEVEL ({}) total skill points earned",
+            SKILL_POINTS_PER_LEVEL
+        );
+    }
+
+    /// Level-up awards SKILL_POINTS_PER_LEVEL SP per level — extended assertion.
+    #[test]
+    fn level_up_awards_skill_points_per_const() {
+        use bevy::asset::AssetPlugin;
+        use bevy::state::app::StatesPlugin;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default(), StatesPlugin));
+        app.init_asset::<ClassTable>();
+        use crate::data::RaceTable;
+        app.init_asset::<RaceTable>();
+
+        let mut class_table = ClassTable::default();
+        class_table.classes.push(fighter_class_def());
+        let class_handle = app
+            .world_mut()
+            .resource_mut::<Assets<ClassTable>>()
+            .add(class_table);
+
+        use crate::data::{RecruitPool, ShopStock, TownServices};
+        app.init_asset::<RecruitPool>();
+        app.init_asset::<ShopStock>();
+        app.init_asset::<TownServices>();
+        let mock_town_assets = TownAssets {
+            shop_stock: Handle::default(),
+            recruit_pool: Handle::default(),
+            services: Handle::default(),
+            race_table: Handle::default(),
+            class_table: class_handle,
+        };
+        app.insert_resource(mock_town_assets);
+        app.insert_resource(ProgressionRng(Box::new(ChaCha8Rng::seed_from_u64(7))));
+        app.add_message::<CombatVictoryEvent>();
+        app.add_systems(Update, apply_level_up_threshold_system);
+
+        let base = BaseStats {
+            strength: 14,
+            intelligence: 8,
+            piety: 8,
+            vitality: 14,
+            agility: 10,
+            luck: 9,
+        };
+        let derived = derive_stats(&base, &[], &StatusEffects::default(), 1);
+        // Give enough XP for exactly 2 level-ups. Accumulating semantics (#19 Q7=B):
+        //   L1→L2 at 100, L2→L3 at 150, L3→L4 at 225. 200 ≥ 100 + 150 thresholds, < 225.
+        let entity = app
+            .world_mut()
+            .spawn((
+                PartyMember,
+                Class::Fighter,
+                base,
+                derived,
+                Experience {
+                    level: 1,
+                    current_xp: 200,
+                    xp_to_next_level: 100,
+                    ..Default::default()
+                },
+                StatusEffects::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let exp = app.world().get::<Experience>(entity).unwrap();
+        assert_eq!(exp.level, 3, "should level up twice from current_xp=250");
+        assert_eq!(
+            exp.unspent_skill_points,
+            SKILL_POINTS_PER_LEVEL * 2,
+            "two level-ups must award 2 × SKILL_POINTS_PER_LEVEL unspent SP"
+        );
+        assert_eq!(
+            exp.total_skill_points_earned,
+            SKILL_POINTS_PER_LEVEL * 2,
+            "two level-ups must award 2 × SKILL_POINTS_PER_LEVEL total SP"
         );
     }
 }
