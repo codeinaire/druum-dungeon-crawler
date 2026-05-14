@@ -6,7 +6,7 @@
 //! - `enemies` — `EnemyDb` (Feature #15)
 //! - `classes` — `ClassTable`, `ClassDef` (Feature #11)
 //! - `races` — `RaceTable`, `RaceData` (Feature #19)
-//! - `spells` — `SpellTable` (Feature #20)
+//! - `spells` — `SpellDb`, `SpellAsset`, `SpellEffect` (Feature #20 — spells registry)
 //! - `town` — `ShopStock`, `RecruitPool`, `TownServices` (Feature #18)
 
 pub mod classes;
@@ -27,5 +27,9 @@ pub use encounters::{EncounterEntry, EncounterTable, EnemyGroup, EnemySpec};
 pub use enemies::EnemyDb;
 pub use items::{ItemAsset, ItemDb, ItemStatBlock};
 pub use races::{RaceData, RaceTable};
-pub use spells::SpellTable;
+pub use spells::{
+    SpellAsset, SpellDb, SpellEffect, SpellSchool, SpellTarget,
+    KNOWN_SPELLS_MAX, MAX_SPELL_DAMAGE, MAX_SPELL_DURATION,
+    MAX_SPELL_HEAL, MAX_SPELL_MP_COST, clamp_known_spells,
+};
 pub use town::{RecruitDef, RecruitPool, ShopEntry, ShopStock, TownServices};

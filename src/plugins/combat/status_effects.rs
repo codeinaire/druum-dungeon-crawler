@@ -40,12 +40,20 @@
 
 use bevy::prelude::*;
 
+use crate::plugins::combat::enemy::Enemy;
 use crate::plugins::dungeon::{MovedEvent, handle_dungeon_input};
 use crate::plugins::party::{
     ActiveEffect, DerivedStats, EquipSlot, EquipmentChangedEvent, PartyMember, StatusEffectType,
     StatusEffects,
 };
 use crate::plugins::state::GameState;
+
+/// Query alias for combatant `StatusEffects` access — both party and enemies.
+///
+/// Widened from PartyMember-only in #20 so debuff spells (Silence, etc.)
+/// land on enemies and `check_dead_and_apply` flags enemy deaths.
+type CombatantStatusQuery<'w, 's> =
+    Query<'w, 's, &'static mut StatusEffects, Or<(With<PartyMember>, With<Enemy>)>>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Messages
@@ -177,7 +185,7 @@ fn tick_on_dungeon_step(
 pub fn apply_status_handler(
     mut events: MessageReader<ApplyStatusEvent>,
     mut equip_changed: MessageWriter<EquipmentChangedEvent>,
-    mut characters: Query<&mut StatusEffects, With<PartyMember>>,
+    mut characters: CombatantStatusQuery,
 ) {
     for ev in events.read() {
         // Pitfall 6: defensive clamp on f32 trust boundary.
@@ -243,7 +251,7 @@ pub fn apply_status_handler(
 fn tick_status_durations(
     mut ticks: MessageReader<StatusTickEvent>,
     mut equip_changed: MessageWriter<EquipmentChangedEvent>,
-    mut characters: Query<&mut StatusEffects, With<PartyMember>>,
+    mut characters: CombatantStatusQuery,
 ) {
     for ev in ticks.read() {
         let Ok(mut status) = characters.get_mut(ev.target) else {

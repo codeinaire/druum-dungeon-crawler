@@ -45,20 +45,28 @@
 //! `Option<Res<CurrentEncounter>>` so combat tests that don't use #16's
 //! spawning path still work.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 
+use crate::data::{SpellDb, SpellEffect, MAX_SPELL_HEAL};
 use crate::plugins::combat::actions::{CombatActionKind, QueuedAction, Side};
 use crate::plugins::combat::combat_log::CombatLog;
 use crate::plugins::combat::enemy::{Enemy, EnemyName};
-use crate::plugins::input::MenuAction;
+use crate::plugins::combat::spell_cast;
+use crate::plugins::combat::spell_cast::SpellCombatant;
 use crate::plugins::combat::status_effects::{
     ApplyStatusEvent, apply_status_handler, check_dead_and_apply, is_asleep, is_paralyzed,
+    is_silenced,
 };
 use crate::plugins::combat::targeting::TargetSelection;
+use crate::plugins::input::MenuAction;
+use crate::plugins::loading::DungeonAssets;
 use crate::plugins::party::character::{
     CharacterName, DerivedStats, PartyMember, PartyRow, PartySlot, StatusEffectType, StatusEffects,
 };
+use crate::plugins::party::inventory::EquipmentChangedEvent;
+use crate::plugins::party::inventory::EquipSlot;
 use crate::plugins::party::progression::CombatVictoryEvent;
 use crate::plugins::state::{CombatPhase, GameState};
 
@@ -69,17 +77,35 @@ use crate::plugins::state::{CombatPhase, GameState};
 /// Query for the per-entity name/status/row snapshot in `execute_combat_actions`.
 /// `DerivedStats` is intentionally absent — accessed via a separate `Query<&mut
 /// DerivedStats>` to avoid Bevy B0002 mutable-aliasing conflict (D-I1).
+///
+/// `StatusEffects` is `&mut` so the Revive arm can call `effects.retain` directly
+/// (the plan's sole-exception path). Using `&mut` subsumes `&`; snapshot building
+/// simply clones the deref — no separate read query needed (avoids B0002 from
+/// holding both `Query<&StatusEffects>` and `Query<&mut StatusEffects>`).
 type CombatantCharsQuery<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
-        &'static StatusEffects,
+        &'static mut StatusEffects,
         &'static PartyRow,
         Option<&'static CharacterName>,
         Option<&'static EnemyName>,
     ),
 >;
+
+/// Bundled Feature-#20 spell system params.
+///
+/// Bundled into a `SystemParam` struct so `execute_combat_actions` stays within
+/// Bevy's 16-param `SystemParam` tuple limit. These three params were added
+/// together in Phase 1 and are cohesive — they exclusively serve the
+/// `CastSpell` dispatch arm.
+#[derive(SystemParam)]
+struct SpellCastParams<'w> {
+    spell_db_assets: Res<'w, Assets<SpellDb>>,
+    spell_handle: Option<Res<'w, DungeonAssets>>,
+    equip_changed: MessageWriter<'w, EquipmentChangedEvent>,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resources
@@ -360,7 +386,9 @@ fn execute_combat_actions(
     mut queue: ResMut<TurnActionQueue>,
     // `chars` does NOT include &DerivedStats to avoid Bevy B0002 conflict with
     // `derived_mut`. DerivedStats access goes exclusively through `derived_mut`.
-    chars: CombatantCharsQuery,
+    // `mut` is required so the Revive arm can call `chars.get_mut(target)` to
+    // clear the Dead status directly (sole-exception path — deviation #2).
+    mut chars: CombatantCharsQuery,
     mut derived_mut: Query<&mut DerivedStats>,
     mut apply_status: MessageWriter<ApplyStatusEvent>,
     mut combat_log: ResMut<CombatLog>,
@@ -374,6 +402,8 @@ fn execute_combat_actions(
     items: Res<Assets<crate::data::ItemAsset>>,
     mut inventories: Query<&mut crate::plugins::party::Inventory>,
     item_instances: Query<&crate::plugins::party::ItemInstance>,
+    // Feature #20 — spell resolver params bundled to stay within Bevy's 16-param limit.
+    mut spell_params: SpellCastParams,
 ) {
     // Pitfall 2: drain a snapshot, not the live queue.
     let actions = std::mem::take(&mut queue.queue);
@@ -529,15 +559,277 @@ fn execute_combat_actions(
                 combat_log.push(format!("{} defends!", name_of(action.actor)), turn);
             }
             CombatActionKind::CastSpell { spell_id } => {
-                // Decision 32: stub.
-                combat_log.push(
-                    format!(
-                        "{} casts {}: not yet implemented.",
-                        name_of(action.actor),
-                        spell_id
-                    ),
-                    turn,
-                );
+                // Feature #20 — real spell resolver (Phase 1).
+                // 1. Resolve SpellDb from DungeonAssets.
+                let Some(spell_db) = spell_params
+                    .spell_handle
+                    .as_deref()
+                    .and_then(|a| spell_params.spell_db_assets.get(&a.spells))
+                else {
+                    combat_log.push("Spell database not loaded.".into(), turn);
+                    continue;
+                };
+                // 2. Look up the spell by id (missing-id: log fizzle, no panic — Q9).
+                let Some(spell) = spell_db.get(spell_id) else {
+                    combat_log.push(
+                        format!("{}'s spell fizzles.", name_of(action.actor)),
+                        turn,
+                    );
+                    continue;
+                };
+                let spell = spell.clone(); // own to free borrow on spell_db
+                let actor_name = name_of(action.actor);
+                // 3. Silence gate (belt-and-suspenders; UI already gates first).
+                {
+                    let snap_status = entity_snapshots.get(&action.actor);
+                    if snap_status.map(|s| is_silenced(&s.status)).unwrap_or(false) {
+                        combat_log.push(
+                            format!("{} is silenced and cannot cast spells.", actor_name),
+                            turn,
+                        );
+                        continue;
+                    }
+                }
+                // 4. MP check.
+                let actor_derived_snapshot = entity_snapshots
+                    .get(&action.actor)
+                    .map(|s| s.derived)
+                    .unwrap_or_default();
+                if !spell_cast::check_mp(&actor_derived_snapshot, &spell) {
+                    combat_log.push(
+                        format!("{} lacks MP for {}.", actor_name, spell.display_name),
+                        turn,
+                    );
+                    continue;
+                }
+                // 5. MP deduction (BEFORE effect).
+                if let Ok(mut d) = derived_mut.get_mut(action.actor) {
+                    spell_cast::deduct_mp(&mut d, &spell);
+                }
+                // 6. Resolve targets using TargetSelection from the action.
+                let party_alive: Vec<Entity> = party_entities
+                    .iter()
+                    .filter(|e| is_alive_entity(*e, &derived_mut))
+                    .collect();
+                let enemy_alive: Vec<Entity> = enemy_entities
+                    .iter()
+                    .filter(|e| is_alive_entity(*e, &derived_mut))
+                    .collect();
+                let targets =
+                    crate::plugins::combat::targeting::resolve_target_with_fallback(
+                        &action.target,
+                        action.actor,
+                        action.actor_side,
+                        &party_alive,
+                        &enemy_alive,
+                        |e| is_alive_entity(e, &derived_mut),
+                        &mut *rng.0,
+                    );
+                if targets.is_empty() {
+                    combat_log.push(
+                        format!("{} casts {} but has no target.", actor_name, spell.display_name),
+                        turn,
+                    );
+                    continue;
+                }
+                // 7. Dispatch on effect.
+                combat_log
+                    .push(format!("{} casts {}!", actor_name, spell.display_name), turn);
+                match &spell.effect {
+                    SpellEffect::Damage { .. } => {
+                        for &target in &targets {
+                            let target_name = name_of(target);
+                            let caster_combatant = {
+                                let snap = entity_snapshots.get(&action.actor);
+                                let current_hp = derived_mut
+                                    .get(action.actor)
+                                    .map(|d| d.current_hp)
+                                    .unwrap_or(0);
+                                SpellCombatant {
+                                    name: actor_name.clone(),
+                                    stats: DerivedStats {
+                                        current_hp,
+                                        ..snap.map(|s| s.derived).unwrap_or_default()
+                                    },
+                                    status: snap
+                                        .map(|s| s.status.clone())
+                                        .unwrap_or_default(),
+                                }
+                            };
+                            let target_combatant = {
+                                let snap = entity_snapshots.get(&target);
+                                let current_hp = derived_mut
+                                    .get(target)
+                                    .map(|d| d.current_hp)
+                                    .unwrap_or(0);
+                                SpellCombatant {
+                                    name: target_name.clone(),
+                                    stats: DerivedStats {
+                                        current_hp,
+                                        ..snap.map(|s| s.derived).unwrap_or_default()
+                                    },
+                                    status: snap
+                                        .map(|s| s.status.clone())
+                                        .unwrap_or_default(),
+                                }
+                            };
+                            // spell_damage_calc clamps power internally via MAX_SPELL_DAMAGE.
+                            let result = spell_cast::spell_damage_calc(
+                                &caster_combatant,
+                                &target_combatant,
+                                &spell,
+                                &mut *rng.0,
+                            );
+                            combat_log.push(result.message.clone(), turn);
+                            if let Ok(mut target_derived) = derived_mut.get_mut(target) {
+                                target_derived.current_hp =
+                                    target_derived.current_hp.saturating_sub(result.damage);
+                                check_dead_and_apply(target, &target_derived, &mut apply_status);
+                            }
+                        }
+                    }
+                    SpellEffect::Heal { amount } => {
+                        let amount = (*amount).min(MAX_SPELL_HEAL);
+                        for &target in &targets {
+                            let target_name = name_of(target);
+                            if let Ok(mut target_derived) = derived_mut.get_mut(target) {
+                                target_derived.current_hp = target_derived
+                                    .current_hp
+                                    .saturating_add(amount)
+                                    .min(target_derived.max_hp);
+                                check_dead_and_apply(target, &target_derived, &mut apply_status);
+                                combat_log.push(
+                                    format!(
+                                        "{} heals {} for {} HP.",
+                                        spell.display_name,
+                                        target_name,
+                                        amount
+                                    ),
+                                    turn,
+                                );
+                            }
+                        }
+                    }
+                    SpellEffect::ApplyStatus {
+                        effect,
+                        potency,
+                        duration,
+                    } => {
+                        let effect = *effect;
+                        let potency = *potency;
+                        let duration = *duration;
+                        let clamped_duration =
+                            duration.map(|d| d.min(crate::data::MAX_SPELL_DURATION));
+                        for &target in &targets {
+                            let target_name = name_of(target);
+                            apply_status.write(ApplyStatusEvent {
+                                target,
+                                effect,
+                                potency,
+                                duration: clamped_duration,
+                            });
+                            combat_log.push(
+                                format!(
+                                    "{} inflicts {:?} on {}.",
+                                    spell.display_name, effect, target_name
+                                ),
+                                turn,
+                            );
+                        }
+                    }
+                    SpellEffect::Buff {
+                        effect,
+                        potency,
+                        duration,
+                    } => {
+                        let effect = *effect;
+                        let potency = *potency;
+                        let duration =
+                            (*duration).min(crate::data::MAX_SPELL_DURATION);
+                        for &target in &targets {
+                            let target_name = name_of(target);
+                            apply_status.write(ApplyStatusEvent {
+                                target,
+                                effect,
+                                potency,
+                                duration: Some(duration),
+                            });
+                            combat_log.push(
+                                format!(
+                                    "{} grants {:?} to {}.",
+                                    spell.display_name, effect, target_name
+                                ),
+                                turn,
+                            );
+                        }
+                    }
+                    SpellEffect::Revive { hp } => {
+                        // Revive: sole exception path that mutates StatusEffects directly.
+                        // Uses action.target directly (not the resolved `targets` Vec)
+                        // because resolve_target_with_fallback treats dead entities as
+                        // invalid and re-routes them — but Revive targets must be dead.
+                        // Order: retain Dead → set HP → write EquipmentChangedEvent.
+                        // Reversing the order zeros the player via recompute (#18b Pitfall 4).
+                        let revive_hp = (*hp).min(MAX_SPELL_HEAL);
+                        // Extract the original target entity from action.target.
+                        let revive_targets: Vec<Entity> = match &action.target {
+                            TargetSelection::Single(t) => vec![*t],
+                            // AllAllies or other AoE Revive: only hit dead allies.
+                            TargetSelection::AllAllies => party_entities.iter().collect(),
+                            _ => targets.clone(),
+                        };
+                        for &target in &revive_targets {
+                            let target_name = name_of(target);
+                            // Defense-in-depth: only revive the actually-dead.
+                            let is_dead = entity_snapshots
+                                .get(&target)
+                                .map(|s| s.status.has(StatusEffectType::Dead))
+                                .unwrap_or(false);
+                            if !is_dead {
+                                combat_log.push(
+                                    format!(
+                                        "{} is not dead; {} has no effect.",
+                                        target_name, spell.display_name
+                                    ),
+                                    turn,
+                                );
+                                continue;
+                            }
+                            // Retain: remove Dead status directly (the ONE exception).
+                            // Access via `chars` which holds &mut StatusEffects.
+                            if let Ok((_, mut target_status, _, _, _)) = chars.get_mut(target) {
+                                target_status
+                                    .effects
+                                    .retain(|e| e.effect_type != StatusEffectType::Dead);
+                            }
+                            // Set HP AFTER clearing Dead status.
+                            if let Ok(mut target_derived) = derived_mut.get_mut(target) {
+                                let clamped = revive_hp.min(target_derived.max_hp);
+                                target_derived.current_hp = clamped;
+                            }
+                            // Write EquipmentChangedEvent so recompute_derived_stats
+                            // picks up the freshly-dead-free status (#18b Pitfall 4).
+                            spell_params.equip_changed.write(EquipmentChangedEvent {
+                                character: target,
+                                slot: EquipSlot::None,
+                            });
+                            combat_log.push(
+                                format!("{} revives {}!", spell.display_name, target_name),
+                                turn,
+                            );
+                        }
+                    }
+                    SpellEffect::Special { variant } => {
+                        // Escape hatch — no Special handlers in v1. Log and continue.
+                        combat_log.push(
+                            format!(
+                                "{} casts {} (unhandled variant: {}); nothing happens.",
+                                actor_name, spell.display_name, variant
+                            ),
+                            turn,
+                        );
+                    }
+                }
             }
             CombatActionKind::UseItem { item } => {
                 let actor_name = name_of(action.actor);
@@ -836,6 +1128,7 @@ mod app_tests {
         ));
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        app.init_asset::<SpellDb>(); // Feature #20 — spell resolver reads Assets<SpellDb>
         app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
         app.init_asset::<crate::data::DungeonFloor>(); // Feature #16 (check_random_encounter reads Assets<DungeonFloor>)
         app.init_asset::<crate::data::EnemyDb>(); // Feature #17 (handle_encounter_request reads Assets<EnemyDb> in Dungeon state)
@@ -1246,12 +1539,15 @@ mod app_tests {
         );
     }
 
+    /// Without DungeonAssets (no spell_handle), `CastSpell` logs
+    /// "Spell database not loaded." and no panic occurs.
     #[test]
-    fn cast_spell_logs_stub_message() {
+    fn cast_spell_missing_id_logs_fizzle_no_panic() {
         let mut app = make_test_app();
         enter_combat(&mut app);
         seed_test_rng(&mut app, 0);
 
+        // No DungeonAssets inserted → spell_handle is None.
         let party_entity = spawn_party_member(&mut app, 100, 0, 10);
         let _enemy = spawn_enemy(&mut app, 50, 0, 5);
 
@@ -1260,7 +1556,7 @@ mod app_tests {
             QueuedAction {
                 actor: party_entity,
                 kind: CombatActionKind::CastSpell {
-                    spell_id: "fireball".into(),
+                    spell_id: "nonexistent_spell".into(),
                 },
                 target: TargetSelection::None,
                 speed_at_queue_time: 10,
@@ -1271,12 +1567,13 @@ mod app_tests {
 
         enter_execute_phase(&mut app);
 
+        // With no DungeonAssets, the resolver logs "Spell database not loaded."
         let log = app.world().resource::<CombatLog>();
         let found = log
             .entries
             .iter()
-            .any(|e| e.message.contains("not yet implemented"));
-        assert!(found, "CastSpell should log stub message");
+            .any(|e| e.message.contains("Spell database not loaded."));
+        assert!(found, "CastSpell with no DungeonAssets should log database-not-loaded message");
     }
 
     #[test]
@@ -1436,6 +1733,419 @@ mod app_tests {
         assert!(
             log.entries.iter().any(|e| e.message.contains("cannot use")),
             "UseItem with KeyItem must log refusal containing 'cannot use'"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Feature #20 — cast_spell_* tests (Phase 1 plan §1.7)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Insert a `SpellDb` asset into the app's `Assets<SpellDb>` registry and
+    /// return the handle. Then create a `DungeonAssets` resource pointing at it.
+    fn inject_spell_db(app: &mut App, spells: Vec<crate::data::SpellAsset>) -> Handle<SpellDb> {
+        let handle = app
+            .world_mut()
+            .resource_mut::<bevy::asset::Assets<SpellDb>>()
+            .add(SpellDb { spells });
+
+        app.world_mut().insert_resource(
+            crate::plugins::loading::DungeonAssets {
+                floor_01: Handle::default(),
+                floor_02: Handle::default(),
+                encounters_floor_01: Handle::default(),
+                item_db: Handle::default(),
+                enemy_db: Handle::default(),
+                class_table: Handle::default(),
+                spells: handle.clone(),
+            },
+        );
+        handle
+    }
+
+    fn mk_damage_spell_asset(id: &str, power: u32, mp_cost: u32) -> crate::data::SpellAsset {
+        use crate::data::{SpellSchool, SpellTarget};
+        crate::data::SpellAsset {
+            id: id.into(),
+            display_name: id.to_ascii_uppercase(),
+            mp_cost,
+            level: 1,
+            school: SpellSchool::Mage,
+            target: SpellTarget::SingleEnemy,
+            effect: crate::data::SpellEffect::Damage { power },
+            description: String::new(),
+            icon_path: String::new(),
+        }
+    }
+
+    fn mk_heal_spell_asset(id: &str, amount: u32, mp_cost: u32) -> crate::data::SpellAsset {
+        use crate::data::{SpellSchool, SpellTarget};
+        crate::data::SpellAsset {
+            id: id.into(),
+            display_name: id.to_ascii_uppercase(),
+            mp_cost,
+            level: 1,
+            school: SpellSchool::Priest,
+            target: SpellTarget::SingleAlly,
+            effect: crate::data::SpellEffect::Heal { amount },
+            description: String::new(),
+            icon_path: String::new(),
+        }
+    }
+
+    fn mk_status_spell_asset(
+        id: &str,
+        effect: StatusEffectType,
+        mp_cost: u32,
+    ) -> crate::data::SpellAsset {
+        use crate::data::{SpellSchool, SpellTarget};
+        crate::data::SpellAsset {
+            id: id.into(),
+            display_name: id.to_ascii_uppercase(),
+            mp_cost,
+            level: 1,
+            school: SpellSchool::Mage,
+            target: SpellTarget::SingleEnemy,
+            effect: crate::data::SpellEffect::ApplyStatus {
+                effect,
+                potency: 1.0,
+                duration: Some(3),
+            },
+            description: String::new(),
+            icon_path: String::new(),
+        }
+    }
+
+    fn mk_revive_spell_asset(id: &str, hp: u32, mp_cost: u32) -> crate::data::SpellAsset {
+        use crate::data::{SpellSchool, SpellTarget};
+        crate::data::SpellAsset {
+            id: id.into(),
+            display_name: id.to_ascii_uppercase(),
+            mp_cost,
+            level: 1,
+            school: SpellSchool::Priest,
+            target: SpellTarget::SingleAlly,
+            effect: crate::data::SpellEffect::Revive { hp },
+            description: String::new(),
+            icon_path: String::new(),
+        }
+    }
+
+    /// A Damage spell reduces target HP and applies Dead if HP drops to zero.
+    #[test]
+    fn cast_spell_damage_applies_hp_loss_and_dead_status() {
+        let mut app = make_test_app();
+        inject_spell_db(&mut app, vec![mk_damage_spell_asset("test_bolt", 999, 2)]);
+        enter_combat(&mut app);
+        // Seed 0: deterministic. Power 999 vs 0 defense → raw 999, variance=0.7..1.0.
+        seed_test_rng(&mut app, 0);
+
+        let caster = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 100,
+                max_hp: 100,
+                current_mp: 50,
+                max_mp: 50,
+                magic_attack: 10,
+                speed: 10,
+                ..Default::default()
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        let enemy = spawn_enemy(&mut app, 10, 0, 5); // low HP, should die
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: caster,
+                kind: CombatActionKind::CastSpell { spell_id: "test_bolt".into() },
+                target: TargetSelection::Single(enemy),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+        app.update(); // allow apply_status_handler to process Dead event
+
+        let enemy_hp = app.world().entity(enemy).get::<DerivedStats>().unwrap().current_hp;
+        assert_eq!(enemy_hp, 0, "Damage spell should reduce enemy to 0 HP");
+
+        let status = app.world().entity(enemy).get::<StatusEffects>().unwrap();
+        assert!(
+            status.has(StatusEffectType::Dead),
+            "Enemy with 0 HP should have Dead status after check_dead_and_apply"
+        );
+    }
+
+    /// A Heal spell increases target HP but does not exceed max_hp.
+    #[test]
+    fn cast_spell_heal_caps_at_max_hp() {
+        let mut app = make_test_app();
+        inject_spell_db(&mut app, vec![mk_heal_spell_asset("test_heal", 999, 2)]);
+        enter_combat(&mut app);
+        seed_test_rng(&mut app, 0);
+
+        let healer = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 80,
+                max_hp: 100,
+                current_mp: 50,
+                max_mp: 50,
+                speed: 10,
+                ..Default::default()
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        let target = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 50,
+                max_hp: 100,
+                speed: 5,
+                ..Default::default()
+            },
+            party_slot: PartySlot(1),
+            ..Default::default()
+        }).id();
+        // Enemy needed so combat doesn't immediately win.
+        let _enemy = spawn_enemy(&mut app, 50, 0, 3);
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: healer,
+                kind: CombatActionKind::CastSpell { spell_id: "test_heal".into() },
+                target: TargetSelection::Single(target),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+
+        let hp = app.world().entity(target).get::<DerivedStats>().unwrap().current_hp;
+        assert_eq!(hp, 100, "Heal with amount>max_hp should cap at max_hp=100");
+    }
+
+    /// A Silence status spell fires an ApplyStatusEvent (visible in the combat log).
+    #[test]
+    fn cast_spell_apply_status_writes_event() {
+        let mut app = make_test_app();
+        inject_spell_db(
+            &mut app,
+            vec![mk_status_spell_asset("test_silence", StatusEffectType::Silence, 3)],
+        );
+        enter_combat(&mut app);
+        seed_test_rng(&mut app, 0);
+
+        let caster = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 100,
+                max_hp: 100,
+                current_mp: 50,
+                max_mp: 50,
+                speed: 10,
+                ..Default::default()
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        let enemy = spawn_enemy(&mut app, 50, 0, 5);
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: caster,
+                kind: CombatActionKind::CastSpell { spell_id: "test_silence".into() },
+                target: TargetSelection::Single(enemy),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+        app.update(); // allow apply_status_handler to process
+
+        // After apply_status_handler processes the ApplyStatusEvent, enemy has Silence.
+        let status = app.world().entity(enemy).get::<StatusEffects>().unwrap();
+        assert!(
+            status.has(StatusEffectType::Silence),
+            "ApplyStatus spell should inflict Silence on enemy"
+        );
+    }
+
+    /// A Revive spell clears Dead status and restores HP to the specified value.
+    #[test]
+    fn cast_spell_revive_restores_hp_to_1_and_clears_dead() {
+        use crate::plugins::party::character::ActiveEffect;
+
+        let mut app = make_test_app();
+        inject_spell_db(&mut app, vec![mk_revive_spell_asset("test_revive", 1, 10)]);
+        enter_combat(&mut app);
+        seed_test_rng(&mut app, 0);
+
+        // Priest caster with enough MP.
+        let caster = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 100,
+                max_hp: 100,
+                current_mp: 50,
+                max_mp: 50,
+                speed: 10,
+                ..Default::default()
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        // Dead ally — construct StatusEffects with Dead inline (no .push() per grep guard).
+        let dead_ally = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 0,
+                max_hp: 50,
+                speed: 5,
+                ..Default::default()
+            },
+            status_effects: StatusEffects {
+                effects: vec![ActiveEffect {
+                    effect_type: StatusEffectType::Dead,
+                    remaining_turns: None,
+                    magnitude: 0.0,
+                }],
+            },
+            party_slot: PartySlot(1),
+            ..Default::default()
+        }).id();
+        let _enemy = spawn_enemy(&mut app, 50, 0, 3);
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: caster,
+                kind: CombatActionKind::CastSpell { spell_id: "test_revive".into() },
+                target: TargetSelection::Single(dead_ally),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+        app.update(); // allow EquipmentChangedEvent recompute
+
+        let status = app.world().entity(dead_ally).get::<StatusEffects>().unwrap();
+        assert!(
+            !status.has(StatusEffectType::Dead),
+            "Revive should clear Dead status"
+        );
+
+        let hp = app.world().entity(dead_ally).get::<DerivedStats>().unwrap().current_hp;
+        assert_eq!(hp, 1, "Revive with hp=1 should restore HP to 1");
+    }
+
+    /// A spell with insufficient MP is blocked: no HP change, log says "lacks MP".
+    #[test]
+    fn cast_spell_insufficient_mp_blocks_cast() {
+        let mut app = make_test_app();
+        inject_spell_db(&mut app, vec![mk_damage_spell_asset("test_bolt", 50, 10)]);
+        enter_combat(&mut app);
+        seed_test_rng(&mut app, 0);
+
+        // Caster with 0 MP — can't cast.
+        let caster = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 100,
+                max_hp: 100,
+                current_mp: 0,
+                max_mp: 0,
+                speed: 10,
+                ..Default::default()
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        let enemy = spawn_enemy(&mut app, 50, 0, 5);
+        let enemy_hp_before = 50u32;
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: caster,
+                kind: CombatActionKind::CastSpell { spell_id: "test_bolt".into() },
+                target: TargetSelection::Single(enemy),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+
+        let log = app.world().resource::<CombatLog>();
+        assert!(
+            log.entries.iter().any(|e| e.message.contains("lacks MP")),
+            "Insufficient MP should log 'lacks MP'"
+        );
+        let enemy_hp = app.world().entity(enemy).get::<DerivedStats>().unwrap().current_hp;
+        assert_eq!(
+            enemy_hp, enemy_hp_before,
+            "Enemy HP should be unchanged when spell is blocked by MP check"
+        );
+    }
+
+    /// A silenced caster trying to cast a spell is blocked at the resolver level.
+    #[test]
+    fn cast_spell_silenced_blocks_cast_in_resolver() {
+        use crate::plugins::party::character::ActiveEffect;
+
+        let mut app = make_test_app();
+        inject_spell_db(&mut app, vec![mk_damage_spell_asset("test_bolt", 50, 2)]);
+        enter_combat(&mut app);
+        seed_test_rng(&mut app, 0);
+
+        // Silenced caster — construct StatusEffects inline (no .push() per grep guard).
+        let caster = app.world_mut().spawn(crate::plugins::party::PartyMemberBundle {
+            derived_stats: DerivedStats {
+                current_hp: 100,
+                max_hp: 100,
+                current_mp: 50,
+                max_mp: 50,
+                speed: 10,
+                ..Default::default()
+            },
+            status_effects: StatusEffects {
+                effects: vec![ActiveEffect {
+                    effect_type: StatusEffectType::Silence,
+                    remaining_turns: Some(3),
+                    magnitude: 0.0,
+                }],
+            },
+            party_slot: PartySlot(0),
+            ..Default::default()
+        }).id();
+        let enemy = spawn_enemy(&mut app, 50, 0, 5);
+        let enemy_hp_before = 50u32;
+
+        write_queued_action(
+            &mut app,
+            QueuedAction {
+                actor: caster,
+                kind: CombatActionKind::CastSpell { spell_id: "test_bolt".into() },
+                target: TargetSelection::Single(enemy),
+                speed_at_queue_time: 10,
+                actor_side: Side::Party,
+                slot_index: 0,
+            },
+        );
+        enter_execute_phase(&mut app);
+
+        let log = app.world().resource::<CombatLog>();
+        assert!(
+            log.entries.iter().any(|e| e.message.contains("silenced")),
+            "Silenced caster should trigger 'silenced' log message"
+        );
+        let enemy_hp = app.world().entity(enemy).get::<DerivedStats>().unwrap().current_hp;
+        assert_eq!(
+            enemy_hp, enemy_hp_before,
+            "Enemy HP should be unchanged when silenced caster attempts spell"
         );
     }
 }

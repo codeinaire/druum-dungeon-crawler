@@ -823,7 +823,7 @@ mod app_tests {
             item_db: Handle::default(),
             enemy_db: Handle::default(),
             class_table: Handle::default(),
-            spell_table: Handle::default(),
+            spells: Handle::default(),
         });
         handle
     }

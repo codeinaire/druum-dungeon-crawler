@@ -1,0 +1,10 @@
+feat(combat): add spell registry and cast resolver (#20a)
+
+Phase 1 of 3 for issue #20 (Spells & Skill Trees). Replaces the empty
+SpellTable stub with a data-driven SpellDb + 15 starter Wizardry-style
+spells (8 Mage / 7 Priest), wires CastSpell in execute_combat_actions to
+a real multi-effect resolver, and adds 19 new unit + integration tests.
+
+SpellMenu UI intentionally stays a stub — that ships in Phase 3 (#20c).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
