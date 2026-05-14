@@ -112,11 +112,12 @@ pub fn node_state(
     match can_unlock_node(node, experience, unlocked) {
         Ok(()) => NodeState::CanUnlock,
         Err(SkillError::Insufficient) => {
-            // Distinguish "SP too low but otherwise ready" from "locked by prereq/level".
-            // Re-check without the SP gate:
             let prereqs_met = node.prerequisites.iter().all(|p| unlocked.has(p));
             let level_met = experience.level >= node.min_level;
-            if prereqs_met && level_met {
+            // Tamper guard: also verify the unspent/total invariant holds.
+            let invariant_ok =
+                experience.unspent_skill_points <= experience.total_skill_points_earned;
+            if prereqs_met && level_met && invariant_ok {
                 NodeState::SpInsufficient
             } else {
                 NodeState::Locked(SkillError::Insufficient)
@@ -157,6 +158,16 @@ fn node_depth<'a>(
 }
 
 /// Return nodes sorted by `(depth, id)` for consistent visual ordering.
+///
+/// # Precondition
+///
+/// The tree MUST be cycle-free (validated by `validate_no_cycles`). Calling
+/// this on a cyclic tree causes infinite recursion in `node_depth`. Both
+/// production call sites guard with `if tree.nodes.is_empty()` after
+/// `validate_skill_trees_on_load` empties cyclic trees.
+///
+/// When constructing test fixtures, run `validate_no_cycles` + `clamp_skill_tree`
+/// first to ensure the tree is safe to pass here.
 fn sorted_nodes(tree: &SkillTree) -> Vec<&SkillNode> {
     let mut memo = std::collections::HashMap::new();
     let mut nodes: Vec<&SkillNode> = tree.nodes.iter().collect();
@@ -561,6 +572,21 @@ mod tests {
         assert_eq!(
             node_state(&node, &exp, &unlocked),
             NodeState::SpInsufficient
+        );
+    }
+
+    /// Tamper-guard: `node_state` returns `Locked` when `unspent > total_earned`
+    /// even if prereqs and level are met. Prevents misleading yellow highlight on
+    /// tampered saves.
+    #[test]
+    fn node_state_returns_locked_when_invariant_violated() {
+        let node = make_node("c", 1, 1, vec![]);
+        // unspent (5) > total_earned (3) — invariant violated.
+        let exp = make_exp(1, 5, 3);
+        let unlocked = UnlockedNodes::default();
+        assert_eq!(
+            node_state(&node, &exp, &unlocked),
+            NodeState::Locked(SkillError::Insufficient)
         );
     }
 
