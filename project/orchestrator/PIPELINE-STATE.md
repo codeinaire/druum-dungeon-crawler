@@ -1,9 +1,9 @@
 # Pipeline State
 
 **Task:** Druum issue #20 — Spells & Skill Trees. Three-PR pipeline (Phase 1 / Phase 2 / Phase 3), each phase = research → plan → implement → review → ship cycle. Plan updated 2026-05-14 for three-PR split.
-**Status:** in-progress — Phase 1 implementer reports 339/339 lib tests pass; awaiting user gate re-verification before manual ship
-**Last Completed Step:** 3 (Phase 1 implement + 3 follow-up user fixes + Option-A widening fix for enemy status application)
-**Current Phase:** Phase 1 — fix applied, ready for user-driven manual gate-check + ship
+**Status:** in-progress — Phase 1 doc-fixup implementer complete, awaiting user gates+commit+push, then re-review
+**Last Completed Step:** 5.1.fixup-impl (Phase 1 fixup: doc-only edits applied per Option-1 review-resolution path)
+**Current Phase:** Phase 1 — fixup commit pending user-side commit+push, then targeted re-review, then Phase 2 start
 
 ## Artifacts
 
@@ -12,18 +12,21 @@
 | 1    | Research    | /Users/nousunio/Repos/Learnings/claude-code/druum/project/research/20260514-druum-20-spells-skill-tree.md |
 | 2    | Plan        | /Users/nousunio/Repos/Learnings/claude-code/druum/project/plans/20260514-120000-feature-20-spells-skill-tree.md |
 | 3    | Implement (Phase 1) | /Users/nousunio/Repos/Learnings/claude-code/druum/project/implemented/20260514-120000-feature-20a-spell-registry.md |
-| 4    | Ship (Phase 1) | BLOCKED — commit msg and PR body prepared at `project/shipper/feature-20a-commit-msg.txt` and `project/shipper/feature-20a-pr-body.md`. User must run `cargo` gates + GitButler commands manually after the test-failure fix lands. |
-| 5    | Code Review (Phase 1) | pending |
-| 3.2  | Implement (Phase 2) | pending — gated on Phase 1 user confirmation |
-| 4.2  | Ship (Phase 2) | pending — branch `feature-20b-skill-trees` |
+| 4    | Ship (Phase 1) | PR: https://github.com/codeinaire/druum-dungeon-crawler/pull/21, Branch: feature-20a-spell-registry, Commit: e343585 |
+| 5    | Code Review (Phase 1) | /Users/nousunio/Repos/Learnings/claude-code/druum/project/reviews/20260514-180000-feature-20a-spell-registry.md — APPROVE / merge-as-is. 1 MEDIUM, 1 LOW. |
+| 5.1.fixup-impl | Doc-only fixup impl (Phase 1, post-review) | Edits applied: `src/plugins/combat/turn_manager.rs:593-600` (MP-check invariant comment), `src/plugins/combat/status_effects.rs:319-320` and `347-348` (TODO(#22) markers). Commit msg at `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20a-fixup-commit-msg.txt`. |
+| 5.1.fixup-ship | Fixup ship (Phase 1, user-side) | pending — user runs gates + `but rub zz feature-20a-spell-registry` + `but commit --message-file <fixup-msg-path>` + `but push feature-20a-spell-registry` |
+| 5.1.fixup-review | Targeted re-review of fixup | pending — narrow scope: verify MP-check comment at `turn_manager.rs:594-607` + TODO markers at `status_effects.rs:319,346` |
+| 3.2  | Implement (Phase 2, STACKED) | pending — branch `feature-20b-skill-trees` to be created FROM `feature-20a-spell-registry`, PR base `feature-20a-spell-registry` |
+| 4.2  | Ship (Phase 2, STACKED) | pending — `gh pr create --base feature-20a-spell-registry` |
 | 5.2  | Code Review (Phase 2) | pending |
-| 3.3  | Implement (Phase 3) | pending — gated on Phase 2 user confirmation |
+| 3.3  | Implement (Phase 3) | pending — gated on Phase 2 user confirmation; stacking strategy TBD (likely stack on Phase 2) |
 | 4.3  | Ship (Phase 3) | pending — branch `feature-20c-spell-menu` |
 | 5.3  | Code Review (Phase 3) | pending |
 
 ## User Decisions
 
-All locked 2026-05-14 (see plan §"User Decisions"):
+All Phase-1-locked decisions retained (see plan §"User Decisions"):
 
 - Q1 — Per-class trees: ALL three classes (Fighter passives-only).
 - Q3 — MP regeneration: none new.
@@ -33,6 +36,32 @@ All locked 2026-05-14 (see plan §"User Decisions"):
 - Q11 — Spell-sim debug: defer to own PR.
 - PR shape: THREE separate PRs.
 - GH-issue reconciliation: no separate spec issue; roadmap is source of truth.
+- After Phase 1 review: PAUSE — do not auto-start Phase 2. User wants explicit confirmation between phases.
+
+### Phase 1 post-review decisions (2026-05-14)
+
+- **Option 1 chosen:** Address MEDIUM/LOW findings on existing branch via doc-only fixup, then proceed to Phase 2.
+- **Phase 2 PR shape:** STACKED — Phase 2 branches from `feature-20a-spell-registry`, `gh pr create --base feature-20a-spell-registry`. When PR #21 merges, GitHub auto-retargets Phase 2's base to main.
+- **Phase 3 stacking:** TBD — confirm with user before Phase 3 ship.
+- **Issue #22:** Already filed by user for `apply_poison_damage` + `apply_regen` widening carry-forward — https://github.com/codeinaire/druum-dungeon-crawler/issues/22.
+- **Re-review scope:** Narrow — verify only the two doc-fixup sites; no full re-review.
+
+## Phase 1 ship details (2026-05-14)
+
+- **Branch:** `feature-20a-spell-registry` from `main`
+- **Initial commit:** `e343585`
+- **Fixup commit:** pending user-side push
+- **PR:** https://github.com/codeinaire/druum-dungeon-crawler/pull/21
+- **Files changed (initial):** 23
+- **Files changed (fixup):** 2 (`turn_manager.rs`, `status_effects.rs`) — comments-only
+- **GitHub PR number is 21 but feature/issue number is #20 Phase 1 (the "20a" suffix). PR #20 was merged feature #19. Roadmap is source of truth.**
+
+## Phase 1 fixup-impl details (2026-05-14)
+
+- **Fix A (MEDIUM):** `src/plugins/combat/turn_manager.rs:593-600` — 8-line invariant comment above the MP-check block in CastSpell arm. Explains snapshot-vs-live split, one-action-per-round invariant, and migration path (`derived_mut.get(actor)`) for future double-cast mechanics.
+- **Fix B (LOW):** `src/plugins/combat/status_effects.rs:319-320` and `347-348` — `// TODO(#22): widen to Or<(With<PartyMember>, With<Enemy>)> when Phase 2 adds combat-round StatusTickEvent emitter for enemies — see PR #21 review.` above each of `apply_poison_damage` and `apply_regen`.
+- **Commit message file:** `/Users/nousunio/Repos/Learnings/claude-code/druum/project/shipper/feature-20a-fixup-commit-msg.txt` — 1-line subject (`docs(combat): address review findings (#21) — MP-check invariant + TODO(#22) markers`) + 3-line body + `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer matching `e343585`'s style.
+- **No code changes, no new tests, no other files touched.** User to re-run gates.
 
 ## Phase 1 implementer deviations (carry forward to reviewer)
 
@@ -43,78 +72,60 @@ All locked 2026-05-14 (see plan §"User Decisions"):
 5. Four `DungeonAssets` test fixtures updated for `spell_table` → `spells` field rename.
 6. **Targeted fix #1 (2026-05-14 follow-up):** `execute_combat_actions` param count exceeded Bevy's 16-tuple `SystemParam` ceiling (was 18). Three Phase-1 spell params (`spell_db_assets`, `spell_handle`, `equip_changed`) collapsed into private `#[derive(SystemParam)] struct SpellCastParams<'w>` in `turn_manager.rs`. Param count now 16 (at ceiling). Added `mut` to `chars: CombatantCharsQuery` for the Revive arm's `chars.get_mut(target)` call. (Note: user later found the actual root cause was a missing `use bevy::ecs::system::SystemParam;` import in `turn_manager.rs` — the bundle is still architecturally correct but the original cascade was the missing import.)
 
-## User-applied follow-up fixes since previous handoff (uncommitted in working tree)
+## User-applied follow-up fixes incorporated into commit e343585
 
-1. Added `use bevy::ecs::system::SystemParam;` to `src/plugins/combat/turn_manager.rs` (real root cause of "fn isn't IntoSystemSet" cascade — the derive macro path is NOT in `bevy::prelude::*`). Implementer MUST keep this import.
-2. Added `app.init_asset::<crate::data::SpellDb>();` to `src/plugins/combat/ai.rs`'s `make_test_app` (3 AI tests panicked because `Res<Assets<SpellDb>>` was unregistered).
+1. Added `use bevy::ecs::system::SystemParam;` to `src/plugins/combat/turn_manager.rs:48` (real root cause of "fn isn't IntoSystemSet" cascade — the derive macro path is NOT in `bevy::prelude::*`).
+2. Added `app.init_asset::<crate::data::SpellDb>();` to `src/plugins/combat/ai.rs:188`'s `make_test_app` (3 AI tests panicked because `Res<Assets<SpellDb>>` was unregistered).
 3. Renamed `spell_table: Handle::default()` → `spells: Handle::default()` in `tests/dungeon_movement.rs:153` and `tests/dungeon_geometry.rs:157`.
+4. Status-effect filter widening (`status_effects.rs:178-181` and `status_effects.rs:243-247`) — `Or<(With<PartyMember>, With<Enemy>)>` per Option-A.
+5. `CombatantStatusQuery` type alias added to `status_effects.rs` for clippy compliance.
 
-## Current gate status (user verified 2026-05-14)
+## Final gate matrix (user-verified 2026-05-14, pre-commit, applies to e343585)
 
 | Gate | Result |
 |---|---|
 | `cargo check` | pass |
 | `cargo check --features dev` | pass |
+| `cargo test --lib` | pass 339/339 |
+| `cargo test --lib --features dev` | pass 343/343 |
+| `cargo test --test '*'` | pass 3/3 (spell_db_loads, item_db, equipping) |
 | `cargo clippy --all-targets -- -D warnings` | pass |
 | `cargo clippy --all-targets --features dev -- -D warnings` | pass |
-| Integration tests (`cargo test --test '*'`) | all 3 pass |
 | Anti-pattern greps on `spell_cast.rs` | zero matches |
-| `cargo test --lib` | implementer reports 339/339 after Option-A fix — user to re-verify |
 
-## Outstanding test failures (re-spawn implementer to resolve)
+**Fixup commit will require user to re-run gates before push (per user's Step 3 instruction).**
 
-**Failing tests:**
-1. `plugins::combat::turn_manager::app_tests::cast_spell_damage_applies_hp_loss_and_dead_status` (line 1875): enemy reaches `current_hp == 0` but `StatusEffects::has(Dead)` returns false.
-2. `plugins::combat::turn_manager::app_tests::cast_spell_apply_status_writes_event` (line 1972): Silence never lands on enemy target.
+## Reviewer focus areas (user-specified, for initial Phase 1 review — historical)
 
-**Root cause (verified by orchestrator):**
-
-`apply_status_handler` at `src/plugins/combat/status_effects.rs:177-180` filters `Query<&mut StatusEffects, With<PartyMember>>`. Enemies don't have `PartyMember`, so `characters.get_mut(ev.target)` returns Err and any `ApplyStatusEvent` targeting an enemy is silently dropped. `tick_status_durations` at line 246 has the same filter.
-
-**Important: this is a latent pre-Phase-1 bug, not a Phase-1 regression.** `turn_manager.rs:547` (basic-attack path) also calls `check_dead_and_apply` on enemy targets, which writes `ApplyStatusEvent { Dead }` — that has been silently dropping since before #20. Nobody noticed because `check_victory_defeat_flee` reads `current_hp == 0` directly, not the Dead status. Phase 1's new tests are the first to assert on the Dead status itself.
-
-**Writer audit (relevant to fix scope):**
-
-All `ApplyStatusEvent` writers in `src/`:
-- `turn_manager.rs:553` — Defend, targets `action.actor` (party member only via combat menu)
-- `turn_manager.rs:725` — spell ApplyStatus arm, targets resolved-target (can be enemy via debuffs like Silence)
-- `turn_manager.rs:751` — spell Buff arm, targets resolved-target (normally allies; potency clamp protects against misuse)
-- `status_effects.rs:400` — `check_dead_and_apply` helper, targets entity passed in (Dead, called for damaged enemies too)
-- `status_effects.rs:*` lines 508-899 — all inside `#[cfg(test)]` module
-- `dungeon/features.rs:447` — Poison trap, targets only `&party` (enemies impossible)
-
-**Three options surfaced to user; user preference is Option B but asked for implementer to pick + justify:**
-
-- **Option A (widen filter):** Change `apply_status_handler` and `tick_status_durations` queries to `Query<&mut StatusEffects, Or<(With<PartyMember>, With<Enemy>)>>`. Pro: single-source-of-truth for status logic (stacking merge, potency clamp, Stone/Dead permanence, EquipmentChangedEvent nudge for stat-modifier removal — all reused for enemies for free). Also fixes the latent basic-attack `Dead`-on-enemy bug. The writer audit shows party-only buffs reach the handler only via writers that target party members (`action.actor` in Defend), so widening the filter is safe.
-- **Option B (sole-exception in turn_manager):** Add a `chars.get_mut(target)` block in the spell Damage/ApplyStatus arms that mutates enemy `StatusEffects` directly when the target lacks `PartyMember`. Mirrors the existing Revive pattern. Con: duplicates ~30 lines of stacking/clamping/nudge logic from `apply_status_handler` per arm and per writer site, and does NOT fix the latent basic-attack bug at line 547 unless duplicated there too. Maintenance hazard if buff stacking rules change.
-- **Option C (drop Dead-on-enemy entirely):** Rely solely on `current_hp == 0` for enemy death; update failing tests; remove ApplyStatus effect for enemies. User flagged this as a gameplay regression (debuff spells become no-ops on enemies). Reject.
-
-**Orchestrator recommendation:** Option A. Reasoning: (a) it matches the existing #14/#15 invariant that `apply_status_handler` is THE single mutator of `StatusEffects.effects` (status_effects.rs:162-164 comment); breaking that invariant with sole-exceptions creates two divergent code paths for the same operation. (b) The writer audit shows widening is safe — no writer would incorrectly buff enemies. (c) It transparently fixes the latent basic-attack `Dead`-on-enemy bug. (d) `EnemyBundle` already includes `Equipment::default()`+`Experience::default()` specifically so the `recompute_derived_stats_on_equipment_change` path works for enemies (see `enemy.rs:8-10` and the D-A5 carve-out), so the `EquipmentChangedEvent` nudge for Dead is harmless on enemies.
-
-But the user explicitly said the implementer should **pick and justify**, so the implementer should weigh both and proceed with whichever they can justify on the merits.
+1. **`apply_status_handler` widening** (`status_effects.rs:178-181`) — is `Or<(With<PartyMember>, With<Enemy>)>` filter safe across all current `ApplyStatusEvent` writers? Confirm no party-only buff (DefenseUp, AttackUp, SpeedUp) can be mistakenly applied to an enemy. Confirm `EquipmentChangedEvent` nudge at line 229 for `Dead` is justified by `EnemyBundle` having `Equipment`/`Experience` (per `enemy.rs:8-10`).
+2. **`tick_status_durations` widening** (`status_effects.rs:243-247`) — same widening. `StatusTickEvent` is currently only written for party (per implementer audit). Verify nothing in dungeon-step or combat-round paths writes a tick event for enemies.
+3. **The `SpellCastParams` SystemParam bundle** (`turn_manager.rs:96-107`) — does the `<'w>`-only lifetime work correctly against Bevy 0.18 conventions?
+4. **5 deviations from plan** in `project/implemented/20260514-120000-feature-20a-spell-registry.md`. Particularly deviation #1 — crit chance uses `accuracy/5%`, not `luck/5%` — does it match damage model intent?
+5. **Carry-forward concern**: `apply_poison_damage` + `apply_regen` (`status_effects.rs`) still PartyMember-only. Safe today but flag as known follow-up for any future enemy-poisonable feature. Tracked-issue-now vs. plan-note-sufficient?
 
 ## Resolution (2026-05-14)
 
-**Option A chosen by implementer.** Files modified:
-
-- `src/plugins/combat/status_effects.rs:43` — added `use crate::plugins::combat::enemy::Enemy;`
-- `src/plugins/combat/status_effects.rs:181` — widened `apply_status_handler` filter to `Or<(With<PartyMember>, With<Enemy>)>`
-- `src/plugins/combat/status_effects.rs:247` — widened `tick_status_durations` filter to `Or<(With<PartyMember>, With<Enemy>)>`
-- `project/implemented/20260514-120000-feature-20a-spell-registry.md` — appended "Follow-up fix #2" section
-
-Implementer's justification (full text in summary):
+**Option A chosen by implementer for the status-effect filter widening.** Justification:
 
 1. Preserves the #14/#15 single-mutator invariant for `StatusEffects.effects`.
 2. Writer audit confirms widening is safe (no party-only-buff writer targets enemies).
 3. Transparently fixes the latent basic-attack `Dead`-on-enemy bug at `turn_manager.rs:547`.
 4. `EnemyBundle` already includes `Equipment::default()`/`Experience::default()` per D-A5 carve-out, so `EquipmentChangedEvent` nudge for Dead works on enemies.
 
-**Edge case flagged by implementer:** `apply_poison_damage` and `apply_regen` still filter `With<PartyMember>`. Currently safe because `StatusTickEvent` is only written for party members. If enemies ever need Poison/Regen tick resolution, those two resolvers need the same widening. Carry forward to Phase 2/3 reviewers and to #20 follow-up items.
+**Edge case flagged by implementer:** `apply_poison_damage` and `apply_regen` still filter `With<PartyMember>`. Currently safe because `StatusTickEvent` is only written for party members. If enemies ever need Poison/Regen tick resolution, those two resolvers need the same widening. Carry forward to Phase 2/3 reviewers and to #20 follow-up items. **2026-05-14: Issue #22 filed; TODO(#22) markers now in code (fixup).**
 
-## Resume instructions (after user gate re-verification)
+## Resume instructions
 
-1. User re-runs `cargo test --lib` (expect 339/339), `cargo clippy --all-targets -- -D warnings` (expect clean), `cargo check --features dev`, `cargo clippy --all-targets --features dev -- -D warnings`, `cargo test --test '*'`.
-2. User stages + commits + pushes via GitButler per `project/shipper/feature-20a-commit-msg.txt` and `project/shipper/feature-20a-pr-body.md`, then opens PR.
-3. User reports PR URL back to orchestrator.
-4. Orchestrator updates Ship row with PR URL + branch, sets `Last Completed Step: 4`, runs `run-reviewer` with PR URL (Step 5).
-5. After review, surface findings to user. Pause for user go-ahead before Phase 2.
+### After user completes fixup ship (gates + commit + push)
+
+1. Orchestrator re-spawns `run-reviewer` with NARROW prompt: "verify the two fixup commits resolve the MEDIUM at `turn_manager.rs:594-607` and the LOW at `status_effects.rs:319,346`; no other re-review needed."
+2. Output to `project/reviews/<dated>-feature-20a-fixup.md`.
+3. If re-review passes: proceed to Phase 2 (stacked).
+4. If re-review flags new issues: pause, surface to user.
+
+### Phase 2 stacked-PR protocol (post fixup-review-pass)
+
+1. **Update plan file** `project/plans/20260514-120000-feature-20-spells-skill-tree.md` Phase 2 section: record stacked-PR decision. Add note: "Phase 2 branches from `feature-20a-spell-registry` (NOT main). `gh pr create --base feature-20a-spell-registry`. When Phase 1 PR #21 merges, Phase 2's base auto-retargets to main via GitHub."
+2. **Run planner** to refine Phase 2 scope (skill trees + SP allocation, per locked plan). Resolve all open questions in one batch.
+3. **Pause for user confirmation** before implementer dispatch. Show Phase 2 plan delta + any Cat-C decisions before code is written.
+4. **Phase 3 stacking decision:** confirm with user BEFORE Phase 3 ship.

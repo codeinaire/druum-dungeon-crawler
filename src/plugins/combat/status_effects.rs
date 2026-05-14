@@ -316,6 +316,8 @@ fn tick_status_durations(
 ///
 /// **Pitfall 7:** does NOT apply `Dead` on zero HP. #15 owns that;
 /// `check_dead_and_apply` is the #15-callable convenience.
+// TODO(#22): widen to Or<(With<PartyMember>, With<Enemy>)> when Phase 2 adds
+// combat-round StatusTickEvent emitter for enemies — see PR #21 review.
 fn apply_poison_damage(
     mut ticks: MessageReader<StatusTickEvent>,
     mut characters: Query<(&StatusEffects, &mut DerivedStats), With<PartyMember>>,
@@ -342,6 +344,8 @@ fn apply_poison_damage(
 ///
 /// **D7-A formula (default, mirroring poison):** `heal = ((max_hp / 20).max(1) as f32 * magnitude) as u32; heal.max(1)`.
 /// Capped at `max_hp` via `.min(max_hp)` after `saturating_add`.
+// TODO(#22): widen to Or<(With<PartyMember>, With<Enemy>)> when Phase 2 adds
+// combat-round StatusTickEvent emitter for enemies — see PR #21 review.
 fn apply_regen(
     mut ticks: MessageReader<StatusTickEvent>,
     mut characters: Query<(&StatusEffects, &mut DerivedStats), With<PartyMember>>,

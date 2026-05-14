@@ -590,7 +590,14 @@ fn execute_combat_actions(
                         continue;
                     }
                 }
-                // 4. MP check.
+                // 4. MP check uses the pre-round snapshot (built once before
+                // the action loop). Safe invariant: each party member commits
+                // exactly one action per round, so the snapshot MP is always
+                // current at check time. The deduction (step 5) writes to the
+                // live `derived_mut`, not back to the snapshot. If future
+                // mechanics allow double-cast (haste, etc.), this check must
+                // switch to `derived_mut.get(actor)` so the second cast sees
+                // the already-deducted MP.
                 let actor_derived_snapshot = entity_snapshots
                     .get(&action.actor)
                     .map(|s| s.derived)
