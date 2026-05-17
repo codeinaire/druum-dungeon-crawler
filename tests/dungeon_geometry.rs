@@ -154,7 +154,7 @@ fn setup_dungeon_assets_and_enter(
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),
-        spell_table: Handle::default(),
+        spells: Handle::default(),
     });
     next_game_state.set(GameState::Dungeon);
 }

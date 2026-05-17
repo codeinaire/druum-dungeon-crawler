@@ -10,6 +10,7 @@ pub mod damage;
 pub mod encounter;
 pub mod enemy;
 pub mod enemy_render;
+pub mod spell_cast;
 pub mod status_effects;
 pub mod targeting;
 pub mod turn_manager;

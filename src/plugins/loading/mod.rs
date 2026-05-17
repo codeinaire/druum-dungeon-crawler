@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RaceTable, RecruitPool, ShopStock, SpellTable, TownServices};
+use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RaceTable, RecruitPool, ShopStock, SpellDb, TownServices};
 use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
@@ -43,8 +43,9 @@ pub struct DungeonAssets {
     pub enemy_db: Handle<EnemyDb>,
     #[asset(path = "classes/core.classes.ron")]
     pub class_table: Handle<ClassTable>,
+    // Feature #20 — spell registry, replaces empty SpellTable stub
     #[asset(path = "spells/core.spells.ron")]
-    pub spell_table: Handle<SpellTable>,
+    pub spells: Handle<SpellDb>,
 }
 
 /// Audio asset handles populated by `bevy_asset_loader` once all .ogg files
@@ -132,7 +133,7 @@ impl Plugin for LoadingPlugin {
                 RonAssetPlugin::<ItemDb>::new(&["items.ron"]),
                 RonAssetPlugin::<EnemyDb>::new(&["enemies.ron"]),
                 RonAssetPlugin::<ClassTable>::new(&["classes.ron"]),
-                RonAssetPlugin::<SpellTable>::new(&["spells.ron"]),
+                RonAssetPlugin::<SpellDb>::new(&["spells.ron"]),
                 RonAssetPlugin::<EncounterTable>::new(&["encounters.ron"]), // Feature #16
                 RonAssetPlugin::<ShopStock>::new(&["shop_stock.ron"]),      // Feature #18
                 RonAssetPlugin::<RecruitPool>::new(&["recruit_pool.ron"]),  // Feature #18

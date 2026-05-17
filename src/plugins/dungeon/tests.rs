@@ -224,7 +224,7 @@ fn insert_test_floor(app: &mut App, floor: DungeonFloor) {
         item_db: Handle::default(),
         enemy_db: Handle::default(),
         class_table: Handle::default(),
-        spell_table: Handle::default(),
+        spells: Handle::default(),
     });
 }
 

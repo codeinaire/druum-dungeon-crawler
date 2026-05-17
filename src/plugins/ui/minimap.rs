@@ -674,7 +674,7 @@ mod tests {
             item_db: Handle::default(),
             enemy_db: Handle::default(),
             class_table: Handle::default(),
-            spell_table: Handle::default(),
+            spells: Handle::default(),
             encounters_floor_01: Handle::default(), // Feature #16
         });
 

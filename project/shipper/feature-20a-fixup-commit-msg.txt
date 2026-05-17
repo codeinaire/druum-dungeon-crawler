@@ -1,0 +1,9 @@
+docs(combat): address review findings (#21) — MP-check invariant + TODO(#22) markers
+
+Add invariant comment at the CastSpell MP-check site explaining the
+snapshot-vs-live split and the one-action-per-member constraint that makes
+it safe. Add TODO(#22) above apply_poison_damage and apply_regen flagging
+the With<PartyMember> query filter that must be widened when Phase 2 adds
+a combat-round StatusTickEvent emitter for enemies.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

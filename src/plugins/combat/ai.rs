@@ -184,6 +184,7 @@ mod app_tests {
         ));
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
+        app.init_asset::<crate::data::SpellDb>();
         // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
         // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin; MinimalPlugins lacks PbrPlugin).
         app.init_asset::<bevy::prelude::Mesh>();

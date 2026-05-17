@@ -1,3 +1,189 @@
-// Stub for Feature #3 — SpellTable has no fields yet.
-// Feature #20 adds the real spell schema.
-()
+// Feature #20 — starter spell registry. 8 Mage + 7 Priest spells.
+// Double-dot extension (.spells.ron) so RonAssetPlugin routes correctly.
+// RON enum-variant struct syntax: Damage(power: 8) NOT Damage { power: 8 }.
+(
+    spells: [
+        // ── Mage school ──────────────────────────────────────────────────────
+        // Mage tier-1: single-target fire bolt
+        (
+            id: "halito",
+            display_name: "Halito",
+            mp_cost: 2,
+            level: 1,
+            school: Mage,
+            target: SingleEnemy,
+            effect: Damage(power: 8),
+            description: "A small bolt of fire. Damages one enemy.",
+            icon_path: "",
+        ),
+        // Mage tier-3: group fire burst
+        (
+            id: "mahalito",
+            display_name: "Mahalito",
+            mp_cost: 8,
+            level: 3,
+            school: Mage,
+            target: AllEnemies,
+            effect: Damage(power: 20),
+            description: "A burst of fire that scorches all enemies.",
+            icon_path: "",
+        ),
+        // Mage tier-1: sleep dust on enemy group
+        (
+            id: "katino",
+            display_name: "Katino",
+            mp_cost: 3,
+            level: 1,
+            school: Mage,
+            target: AllEnemies,
+            effect: ApplyStatus(effect: Sleep, potency: 1.0, duration: Some(3)),
+            description: "A sleep powder that puts enemies to rest.",
+            icon_path: "",
+        ),
+        // Mage tier-7: massive fire AoE — boss tier
+        (
+            id: "tiltowait",
+            display_name: "Tiltowait",
+            mp_cost: 20,
+            level: 7,
+            school: Mage,
+            target: AllEnemies,
+            effect: Damage(power: 100),
+            description: "An inferno that obliterates all enemies.",
+            icon_path: "",
+        ),
+        // Mage tier-2: silence a single enemy
+        (
+            id: "dilto",
+            display_name: "Dilto",
+            mp_cost: 4,
+            level: 2,
+            school: Mage,
+            target: SingleEnemy,
+            effect: ApplyStatus(effect: Silence, potency: 1.0, duration: Some(3)),
+            description: "Seals an enemy's voice, preventing spellcasting.",
+            icon_path: "",
+        ),
+        // Mage tier-1: self defense buff
+        (
+            id: "mogref",
+            display_name: "Mogref",
+            mp_cost: 3,
+            level: 1,
+            school: Mage,
+            target: Self_,
+            effect: Buff(effect: DefenseUp, potency: 0.5, duration: 3),
+            description: "Hardens the caster's skin to deflect blows.",
+            icon_path: "",
+        ),
+        // Mage tier-2: sleep a single enemy
+        (
+            id: "sopic",
+            display_name: "Sopic",
+            mp_cost: 4,
+            level: 2,
+            school: Mage,
+            target: SingleEnemy,
+            effect: ApplyStatus(effect: Sleep, potency: 1.0, duration: Some(3)),
+            description: "Lulls one enemy into a deep slumber.",
+            icon_path: "",
+        ),
+        // Mage tier-4: paralyze a single enemy
+        (
+            id: "lokara",
+            display_name: "Lokara",
+            mp_cost: 6,
+            level: 4,
+            school: Mage,
+            target: SingleEnemy,
+            effect: ApplyStatus(effect: Paralysis, potency: 1.0, duration: Some(3)),
+            description: "Locks an enemy's muscles in rigid paralysis.",
+            icon_path: "",
+        ),
+        // ── Priest school ─────────────────────────────────────────────────────
+        // Priest tier-1: single-target heal
+        (
+            id: "dios",
+            display_name: "Dios",
+            mp_cost: 2,
+            level: 1,
+            school: Priest,
+            target: SingleAlly,
+            effect: Heal(amount: 8),
+            description: "A prayer that mends wounds on one ally.",
+            icon_path: "",
+        ),
+        // Priest tier-3: stronger single-target heal
+        (
+            id: "madios",
+            display_name: "Madios",
+            mp_cost: 6,
+            level: 3,
+            school: Priest,
+            target: SingleAlly,
+            effect: Heal(amount: 25),
+            description: "A fervent prayer that greatly restores one ally.",
+            icon_path: "",
+        ),
+        // Priest tier-5: full-party heal
+        (
+            id: "madi",
+            display_name: "Madi",
+            mp_cost: 15,
+            level: 5,
+            school: Priest,
+            target: AllAllies,
+            effect: Heal(amount: 99),
+            description: "A grand benediction that heals all allies.",
+            icon_path: "",
+        ),
+        // Priest tier-2: attack buff for party
+        (
+            id: "matu",
+            display_name: "Matu",
+            mp_cost: 4,
+            level: 2,
+            school: Priest,
+            target: AllAllies,
+            effect: Buff(effect: AttackUp, potency: 0.5, duration: 3),
+            description: "Blesses the party with divine strength.",
+            icon_path: "",
+        ),
+        // Priest tier-4: defense buff for party
+        (
+            id: "bamatu",
+            display_name: "Bamatu",
+            mp_cost: 6,
+            level: 4,
+            school: Priest,
+            target: AllAllies,
+            effect: Buff(effect: DefenseUp, potency: 0.5, duration: 3),
+            description: "Surrounds the party in a divine shield.",
+            icon_path: "",
+        ),
+        // Priest tier-3: speed buff for self
+        (
+            id: "kalki",
+            display_name: "Kalki",
+            mp_cost: 4,
+            level: 3,
+            school: Priest,
+            target: Self_,
+            effect: Buff(effect: SpeedUp, potency: 0.5, duration: 3),
+            description: "Blesses the caster with divine swiftness.",
+            icon_path: "",
+        ),
+        // Priest tier-5: revive a fallen ally
+        (
+            id: "di",
+            display_name: "Di",
+            mp_cost: 10,
+            level: 5,
+            school: Priest,
+            target: SingleAlly,
+            effect: Revive(hp: 1),
+            description: "Calls back a fallen ally from the brink of death.",
+            icon_path: "",
+        ),
+    ],
+)
