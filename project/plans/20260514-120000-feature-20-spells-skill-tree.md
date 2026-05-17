@@ -1,7 +1,7 @@
 # Plan: Feature #20 — Spells & Skill Trees
 
 **Date:** 2026-05-14
-**Status:** Phase 2 Implemented — user decisions locked 2026-05-14. Phase 1 (spell registry) shipped as PR #21. Phase 2 (skill trees + Guild Skills) implemented 2026-05-14; pending cargo check/test verification and PR creation. Phase 3 (SpellMenu UI) pending user go-ahead. Orchestrator pauses between phases for explicit user confirmation.
+**Status:** Phase 3 Implemented — 2026-05-14. Phase 1 (spell registry) shipped as PR #21. Phase 2 (skill trees + Guild Skills) implemented 2026-05-14. Phase 3 (SpellMenu UI) implemented 2026-05-14; awaiting cargo check/test gate run and user ship sequence.
 **Research:** project/research/20260514-druum-20-spells-skill-tree.md
 **Depends on:** 20260513-120000-feature-19-character-creation.md, 20260512-173000-feature-18b-town-temple-guild.md, 20260508-100000-feature-15-turn-based-combat-core.md
 
@@ -170,6 +170,17 @@ Each phase is its own branch, its own commit, its own PR, its own implement → 
 - [ ] DAG validation smoke (Phase 2 carryover): introduce a cycle in mage.skills.ron, confirm `error!` log + empty tree, then revert
 
 **Phase 3 is the user-facing payoff.** Reviewer should expect a small diff focused on UI plumbing.
+
+**Stacked-PR protocol (Phase 3 ship)** — Phase 3 is shipped as a **stacked PR on top of Phase 2** (CONFIRMED post-Phase-2 review, 2026-05-14). Until Phase 2's PR #23 merges, Phase 3's PR targets `feature-20b-skill-trees` as its base; when #23 merges to `main` (or to its own base if Phase 1 hasn't merged yet), GitHub auto-retargets Phase 3's base. Three-PR stack at ship time: #21 ← #23 ← #(Phase 3). Concrete rules:
+
+- **Branch from `feature-20b-skill-trees`, NOT from `main` and NOT from `feature-20a-spell-registry`.** Use `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` to create the branch stacked on Phase 2's tip. The `--anchor` flag is REQUIRED for stacked branches in the current `but` version.
+- **GitButler stacked-branch creation:** `but commit <new-branch-name>` does NOT auto-create branches in the current `but` version — it errors with `Branch '<name>' not found`. The CLAUDE.md guidance saying "creates a NEW branch with that name and route the commit there" is OUTDATED. You MUST run `but branch new feature-20c-spell-menu --anchor feature-20b-skill-trees` BEFORE staging or committing. This was the friction during Phase 2 ship; do not repeat.
+- **Verify with `but status` BEFORE creating the branch** — `feature-20a-spell-registry` AND `feature-20b-skill-trees` should both show applied commits in the stack; no other branches should have applied commits. If a stray branch shows applied commits, stop and re-check; do NOT create the Phase 3 branch from a polluted state.
+- **PR creation:** `gh pr create --base feature-20b-skill-trees --head feature-20c-spell-menu --title "feat(combat): functional spell menu and end-to-end casting (#20c)" --body-file <path>`.
+- **Auto-retarget on Phase 2 merge:** when PR #23 merges, GitHub automatically retargets PR #(Phase 3)'s base from `feature-20b-skill-trees` to whatever PR #23 was targeting (likely `main`, or `feature-20a-spell-registry` if Phase 1 hasn't merged yet). No manual action required for the auto-retarget itself.
+- **Rebase discipline (Phase 1 fixups):** if PR #21 receives further fixup commits before merging, BOTH Phase 2 and Phase 3 branches must be rebased onto the updated `feature-20a-spell-registry` tip. Procedure: `git fetch origin` → `but status` (verify clean stack) → rebase `feature-20b-skill-trees` onto updated `feature-20a-spell-registry` tip → rebase `feature-20c-spell-menu` onto updated `feature-20b-skill-trees` tip → re-run all gates (`cargo check`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`) → `btp feature-20b-skill-trees` AND `btp feature-20c-spell-menu`.
+- **Rebase discipline (Phase 2 fixups):** if PR #23 receives further fixup commits before merging, Phase 3's branch must be rebased onto the updated `feature-20b-skill-trees` tip. Procedure: `git fetch origin` → `but status` (verify clean stack) → rebase `feature-20c-spell-menu` onto updated `feature-20b-skill-trees` tip → re-run gates → `btp feature-20c-spell-menu`.
+- **No fourth phase.** Phase 3 is the terminal phase for #20. Subsequent polish work (spell icons #25, spell-sim debug, etc.) ships in its own PR not stacked on this chain.
 
 ### Phase orchestration policy
 
@@ -514,7 +525,7 @@ Verification gates for Steps 3.1, 2.1, 2.3, 2.5, 3.4, 3.5 each include a "must c
 *Scope:* Steps 2.6 + 2.7 below. The Phase 1 + Phase 2 PRs must be merged to `main` first (or at minimum, both PRs' branches must be parent commits of Phase 3's branch — see "Phase orchestration policy" above).
 *Phase-3 forward-dependency check (before starting):* `KnownSpells` is a real component (Phase 2 shipped it); `SpellDb` is loaded (Phase 1 shipped it); `WarnedMissingSpells` resource is init'd (Phase 2). The SpellMenu replacement is purely combat-UI plumbing.
 
-- [ ] **2.6** Replace the `SpellMenu` stub at `src/plugins/combat/ui_combat.rs:457-473` with the real two-pane menu (~+150 modified LOC). Add to `paint_combat_screen`'s system signature and the `handle_combat_input` system signature:
+- [x] **2.6** Replace the `SpellMenu` stub at `src/plugins/combat/ui_combat.rs:457-473` with the real two-pane menu (~+150 modified LOC). Add to `paint_combat_screen`'s system signature and the `handle_combat_input` system signature:
   ```rust
   spell_db_assets: Res<Assets<crate::data::SpellDb>>,
   dungeon_assets: Option<Res<crate::plugins::loading::DungeonAssets>>,
@@ -529,17 +540,32 @@ Verification gates for Steps 3.1, 2.1, 2.3, 2.5, 3.4, 3.5 each include a "must c
   - Resolve `spell_db` via `dungeon_assets.and_then(|a| spell_db_assets.get(&a.spells))`. If None: paint "Spells: loading..." and return.
   - Get `known_spells = known_spells_q.get(actor_entity).ok()`. If None: paint "(no spells)" and return.
   - Build `castable: Vec<&SpellAsset> = known_spells.spells.iter().filter_map(|id| { let spell = spell_db.get(id); if spell.is_none() && warned.set.insert((id.clone(), actor_entity)) { warn!("Character {:?}'s KnownSpells references missing spell '{}' (filtered)", actor_entity, id); } spell }).filter(|s| s.mp_cost.min(MAX_SPELL_MP_COST) <= derived.current_mp).collect();`. (Per Q9 default — warn once per `(spell_id, character)` pair, filter silently.)
+  - **Cat-C-4 = A (empty castable):** If `castable.is_empty()` AND `known_spells.spells.is_empty()`: paint `"(no spells)"` (existing branch for "character knows nothing"). If `castable.is_empty()` AND `!known_spells.spells.is_empty()`: paint `"(no castable spells)"` — character knows spells but none affordable (MP-short or all filtered as missing). Do NOT auto-pop in either empty case; wait for the user to press Esc. Symmetric UX with `"(no spells)"`.
   - Render a centered egui `Window` titled "Spells": cursor-highlighted list of `"{display_name} (MP {mp_cost})"`, plus the cursor entry's `description` below.
   - Footer label: `"[Up/Down] Pick  |  [Enter] Select target  |  [Esc] Back"`.
   In `handle_combat_input`'s `MenuFrame::SpellMenu` arm:
-  - On `MenuNavAction::Up`/`Down`: `input_state.spell_cursor = input_state.spell_cursor.saturating_sub(1)` / `+= 1` clamped to `castable.len() - 1`.
-  - On `MenuNavAction::Confirm`: `let spell = castable[input_state.spell_cursor];` — push `MenuFrame::TargetSelect { kind: CombatActionKind::CastSpell { spell_id: spell.id.clone() } }` if `spell.target` is `SingleEnemy` or `SingleAlly`. For `AllEnemies`/`AllAllies`/`Self_`, commit directly to queue (no target prompt) — same shape as Defend/Flee commit at `ui_combat.rs:373-409`. Reset `spell_cursor = 0`. Set `active_slot = None` for committed-direct case.
+  - On `MenuNavAction::Up`/`Down`: `input_state.spell_cursor = input_state.spell_cursor.saturating_sub(1)` / `+= 1` clamped to `castable.len() - 1`. **Cat-C-6 = A: Confirmed non-wrap (saturating).** Consistent with Main menu cursor + Guild Skills cursor — do NOT add wrap-around. Saturating is the project default for combat-UI cursors.
+  - On `MenuNavAction::Confirm`: guard with `if castable.is_empty() { return; }` (no-op when nothing to confirm). Then `let spell = castable[input_state.spell_cursor].clone();` (own to free borrow before mutating input_state). **Cat-C-5 = A (SingleEnemy + all enemies dead):** Before pushing `MenuFrame::TargetSelect` for `SingleEnemy`, pre-check the alive-enemy list mirroring Attack's guard pattern in `turn_manager.rs:475-478,489-492` — i.e., compute `enemy_alive = enemies.iter().filter(|e| derived.get(*e).map(|d| d.current_hp > 0).unwrap_or(false)).collect::<Vec<_>>()`. If `enemy_alive.is_empty()`: push `combat_log` with `format!("{}: no valid targets for {}", actor_name, spell.display_name)` (resolve `actor_name` via the active-slot's `Name` component, same way Attack's branch resolves it), and `return;` — stay in SpellMenu, no frame push. (Symmetric pre-check for `SingleAlly` is OPTIONAL — defer; party-wipe means combat ended.) For non-empty enemy-alive on `SingleEnemy` / non-empty ally-alive on `SingleAlly`: push `MenuFrame::TargetSelect { kind: CombatActionKind::CastSpell { spell_id: spell.id.clone() } }`. For `AllEnemies`/`AllAllies`/`Self_`, commit directly to queue (no target prompt) — same shape as Defend/Flee commit at `ui_combat.rs:373-409`. Reset `spell_cursor = 0`. Set `active_slot = None` for committed-direct case. **Δ LOC for Cat-C-5 guard: ~+4-6 LOC.**
   - On `MenuNavAction::Cancel`: pop to Main (existing logic at line 328-335 already covers this).
   - Silence gate at line 458-466 stays as-is (defense-in-depth + same-frame UX feedback).
   - Reset `input_state.spell_cursor = 0` when entering SpellMenu (in the Main arm's case 2 dispatch at line 387-390).
   **Files:** `src/plugins/combat/ui_combat.rs` (+150 modified LOC), `src/plugins/combat/turn_manager.rs` (+1 modified line for the `spell_cursor` field).
 
-- [ ] **2.7** Update `dev` party default `KnownSpells` (NOT a step in the implementer path proper — gated `#[cfg(feature = "dev")]`). In `src/plugins/party/mod.rs` `spawn_default_debug_party` at line 105-161, ~+12 modified LOC: for Mira (Mage), `.insert(KnownSpells { spells: vec!["halito".into(), "katino".into()] })`. For Father Gren (Priest), `.insert(KnownSpells { spells: vec!["dios".into(), "matu".into()] })`. Fighters get `KnownSpells::default()` (auto via bundle default). This makes the manual smoke test "win combat, then cast a spell" possible. Without this, the dev party knows nothing and the SpellMenu always shows "(no spells)".
+- [x] **2.7** Update `dev` party default `KnownSpells` (NOT a step in the implementer path proper — gated `#[cfg(feature = "dev")]`). In `src/plugins/party/mod.rs` `spawn_default_debug_party` (fn decl at line 117, body lines 130-171 after Phase 2 ship; the `#[cfg(feature = "dev")]` gate at line 116 stays untouched). The roster array at lines 146-151 already pairs `(name, class, row)`; chain a `.insert(...)` on the existing `commands.spawn(PartyMemberBundle { ... }).insert(Inventory::default())` block (lines 156-168) per-member by indexing on `name` or `class`. Concrete pattern (mirrors the existing `Inventory::default()` insert at line 168):
+  ```rust
+  let known = match *class {
+      Class::Mage => KnownSpells { spells: vec!["halito".into(), "katino".into()] },
+      Class::Priest => KnownSpells { spells: vec!["dios".into(), "matu".into()] },
+      _ => KnownSpells::default(),
+  };
+  commands
+      .spawn(PartyMemberBundle { /* … existing fields … */ ..Default::default() })
+      .insert(Inventory::default())
+      .insert(known);
+  ```
+  Fighters (Aldric, Borin) fall through to `KnownSpells::default()` — empty list, SpellMenu shows "(no spells)". This makes the manual smoke test "win combat, then cast a spell" possible. Without this, the dev party knows nothing and the SpellMenu always shows "(no spells)".
+
+  **Compatibility note:** `KnownSpells` is already a field on `PartyMemberBundle` (per Phase 2 ship, `src/plugins/party/character.rs:347`); the `..Default::default()` in the existing spawn already produces an empty `KnownSpells`. The `.insert(known)` overwrite is the same pattern Phase 2's Step 2.3 documented (component overwrite via `.insert` after `.spawn`).
   **Files:** `src/plugins/party/mod.rs` (+12 modified LOC).
 
 ### Phase 2 (PR #20b) — Skill trees, SP allocation, Guild Skills mode (part B: data/skills + Guild Skills UI)
@@ -846,6 +872,14 @@ Verification gates for Steps 3.1, 2.1, 2.3, 2.5, 3.4, 3.5 each include a "must c
 12. **node_cursor sorted order in tests.** The `unlock_node_adds_to_unlocked_set_and_deducts_skill_point` test initially would have used `node_cursor = 0` expecting `root_node`. But `sorted_nodes` sorts by `(depth, id)`: all four depth-0 nodes sort alphabetically giving `level_gated(0), root_node(1), stat_node(2)` and `spell_node` at depth 1 goes last. Used `node_cursor = 1` for `root_node` in the test.
 
 13. **Unused `mut exp` binding in test body.** The `unlock_node_learn_spell_grant_appends_known_spells` test had a dead code block `{ let mut exp = ...; /* comment */ }`. Removed the block; comment preserved inline.
+
+**Phase 3 discoveries (Steps 2.6 + 2.7):**
+
+14. **SpellMenuState enum pattern — multi-borrow avoidance.** The plan sketch implied computing the castable list inline inside the `egui::Window::show` closure. However, `mut warned: ResMut<WarnedMissingSpells>` and `known_spells_q: Query<&KnownSpells>` inside a `FnOnce` closure triggers borrow-checker issues. Restructured: compute the full display state into a local `SpellMenuState` enum OUTSIDE the closure, then pass only owned/copied data into the closure. Semantics are identical.
+
+15. **`let...else` with non-diverging else block is invalid Rust.** An initial draft used `let Some(spell_db) = spell_db else { SpellMenuState::Loading };` which is not valid Rust — `let...else` requires the else block to diverge. Restructured to nested `match` expressions.
+
+16. **`handle_combat_input` party query gains `&CharacterName` for Cat-C-5 log message.** The plan's Cat-C-5 requires `"{actor_name}: no valid targets for {spell}"` — this requires the actor's display name, which is only accessible by adding `&CharacterName` to the party query's fetch tuple. Updated from 4-tuple to 5-tuple; all destructuring patterns updated accordingly.
 
 ## Verification
 

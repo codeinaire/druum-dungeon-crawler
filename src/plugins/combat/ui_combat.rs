@@ -129,6 +129,7 @@ fn attach_egui_to_dungeon_camera(
 ///
 /// D-Q2=A: persistent action panel (persistent bottom panel, always visible
 /// during `CombatPhase::PlayerInput`).
+#[allow(clippy::too_many_arguments)]
 fn paint_combat_screen(
     mut contexts: EguiContexts,
     log: Res<CombatLog>,
@@ -145,6 +146,11 @@ fn paint_combat_screen(
     >,
     enemies: Query<(Entity, &EnemyName, &DerivedStats, &StatusEffects), With<Enemy>>,
     phase: Res<State<CombatPhase>>,
+    // Feature #20 Phase 3 — SpellMenu painter params.
+    spell_db_assets: Res<Assets<crate::data::SpellDb>>,
+    dungeon_assets: Option<Res<crate::plugins::loading::DungeonAssets>>,
+    known_spells_q: Query<&crate::plugins::party::KnownSpells, With<PartyMember>>,
+    mut warned: ResMut<crate::plugins::party::WarnedMissingSpells>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -254,6 +260,136 @@ fn paint_combat_screen(
             });
     }
 
+    // SpellMenu overlay (center) — Feature #20 Phase 3.
+    // Rendered when SpellMenu is top-of-stack during PlayerInput.
+    let is_spell_menu = matches!(phase.get(), CombatPhase::PlayerInput)
+        && matches!(
+            input_state.menu_stack.last(),
+            Some(MenuFrame::SpellMenu)
+        );
+    if is_spell_menu {
+        // Compute the spell display state outside the egui closure to avoid
+        // complex multi-borrow lifetime issues (ResMut + Query inside FnOnce).
+
+        // Resolve the active actor entity and current MP.
+        let actor_info = input_state
+            .active_slot
+            .and_then(|slot| {
+                party
+                    .iter()
+                    .find(|(_, _, ps, _, _)| ps.0 == slot)
+                    .map(|(e, _, _, derived, _)| (e, derived.current_mp))
+            });
+
+        // Compute the castable spell list (owned values to survive outside borrows).
+        enum SpellMenuState {
+            NoActor,
+            Loading,
+            Empty,          // known_spells.is_empty()
+            NoCastable,     // knows spells but all filtered / MP-short
+            Castable {
+                spells: Vec<crate::data::SpellAsset>,
+                cursor: usize,
+            },
+        }
+
+        let menu_state: SpellMenuState = match actor_info {
+            None => SpellMenuState::NoActor,
+            Some((actor_entity, current_mp)) => {
+                let spell_db = dungeon_assets
+                    .as_ref()
+                    .and_then(|a| spell_db_assets.get(&a.spells));
+                match spell_db {
+                    None => SpellMenuState::Loading,
+                    Some(spell_db) => {
+                        match known_spells_q.get(actor_entity).ok() {
+                            None => SpellMenuState::Empty,
+                            Some(known_spells) if known_spells.spells.is_empty() => {
+                                SpellMenuState::Empty
+                            }
+                            Some(known_spells) => {
+                                // Build castable list; emit warn-once for missing spell IDs (Q9).
+                                let castable: Vec<crate::data::SpellAsset> = known_spells
+                                    .spells
+                                    .iter()
+                                    .filter_map(|id| {
+                                        let spell = spell_db.get(id);
+                                        if spell.is_none()
+                                            && warned.set.insert((id.clone(), actor_entity))
+                                        {
+                                            warn!(
+                                                "Character {:?}'s KnownSpells references missing spell '{}' (filtered)",
+                                                actor_entity, id
+                                            );
+                                        }
+                                        spell.cloned()
+                                    })
+                                    .filter(|s| {
+                                        s.mp_cost.min(crate::data::MAX_SPELL_MP_COST) <= current_mp
+                                    })
+                                    .collect();
+
+                                if castable.is_empty() {
+                                    SpellMenuState::NoCastable
+                                } else {
+                                    let cursor = input_state
+                                        .spell_cursor
+                                        .min(castable.len().saturating_sub(1));
+                                    SpellMenuState::Castable { spells: castable, cursor }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        egui::Window::new("Spells")
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                match &menu_state {
+                    SpellMenuState::NoActor => {
+                        ui.label("(no active member)");
+                    }
+                    SpellMenuState::Loading => {
+                        ui.label("Spells: loading...");
+                    }
+                    SpellMenuState::Empty => {
+                        ui.label("(no spells)");
+                        ui.label("[Esc] Back");
+                    }
+                    SpellMenuState::NoCastable => {
+                        // Cat-C-4 = A: character knows spells but none are castable.
+                        ui.label("(no castable spells)");
+                        ui.label("[Esc] Back");
+                    }
+                    SpellMenuState::Castable { spells, cursor } => {
+                        for (i, spell) in spells.iter().enumerate() {
+                            let color = if i == *cursor {
+                                egui::Color32::YELLOW
+                            } else {
+                                egui::Color32::WHITE
+                            };
+                            ui.colored_label(
+                                color,
+                                format!("{} (MP {})", spell.display_name, spell.mp_cost),
+                            );
+                        }
+                        if let Some(selected) = spells.get(*cursor) {
+                            ui.separator();
+                            if !selected.description.is_empty() {
+                                ui.label(&selected.description);
+                            }
+                        }
+                        ui.separator();
+                        ui.label("[Up/Down] Pick  |  [Enter] Select target  |  [Esc] Back");
+                    }
+                }
+            });
+    }
+
     Ok(())
 }
 
@@ -293,15 +429,22 @@ fn format_status_effects(status: &StatusEffects) -> String {
 ///
 /// - `Main`: Confirm → hardcoded Attack → opens `TargetSelect` submenu.
 /// - `TargetSelect`: Up/Down moves cursor; Confirm commits to queue; Cancel pops.
-/// - `SpellMenu`/`ItemMenu`: stub; logs "not yet implemented"; pops to Main.
+/// - `SpellMenu`: Feature #20 Phase 3 — two-pane spell selector with cursor navigation.
+/// - `ItemMenu`: stub; logs "not yet implemented"; pops to Main.
+#[allow(clippy::too_many_arguments)]
 fn handle_combat_input(
     actions: Res<ActionState<MenuNavAction>>,
     mut input_state: ResMut<PlayerInputState>,
     mut queue: ResMut<TurnActionQueue>,
     mut combat_log: ResMut<CombatLog>,
-    party: Query<(Entity, &PartySlot, &DerivedStats, &StatusEffects), With<PartyMember>>,
+    party: Query<(Entity, &CharacterName, &PartySlot, &DerivedStats, &StatusEffects), With<PartyMember>>,
     enemies: Query<(Entity, &DerivedStats, &StatusEffects), With<Enemy>>,
     phase: Res<State<CombatPhase>>,
+    // Feature #20 Phase 3 — spell resolver params.
+    spell_db_assets: Res<Assets<crate::data::SpellDb>>,
+    dungeon_assets: Option<Res<crate::plugins::loading::DungeonAssets>>,
+    known_spells_q: Query<&crate::plugins::party::KnownSpells, With<PartyMember>>,
+    mut warned: ResMut<crate::plugins::party::WarnedMissingSpells>,
 ) {
     // Only act in PlayerInput.
     if !matches!(phase.get(), CombatPhase::PlayerInput) {
@@ -312,8 +455,8 @@ fn handle_combat_input(
     };
 
     // Find the active actor entity.
-    let Some((actor_entity, _, derived, status)) =
-        party.iter().find(|(_, ps, _, _)| ps.0 == active_slot)
+    let Some((actor_entity, actor_name, _, derived, status)) =
+        party.iter().find(|(_, _, ps, _, _)| ps.0 == active_slot)
     else {
         return;
     };
@@ -325,6 +468,8 @@ fn handle_combat_input(
         .unwrap_or(MenuFrame::Main);
 
     // Cancel: pop submenu (top-of-stack only; Main does nothing).
+    // NOTE: spell_cursor is reset on *entry* to SpellMenu (Main arm case 2, line 532),
+    // not on exit. Any future code that pushes SpellMenu directly must reset it.
     if actions.just_pressed(&MenuNavAction::Cancel) {
         if input_state.menu_stack.len() > 1 {
             input_state.menu_stack.pop();
@@ -385,7 +530,8 @@ fn handle_combat_input(
                     input_state.active_slot = None;
                 }
                 2 => {
-                    // Spell → push stub menu (handler logs and pops next frame).
+                    // Spell → push SpellMenu. Reset cursor on entry (Cat-C-6 = A).
+                    input_state.spell_cursor = 0;
                     input_state.menu_stack.push(MenuFrame::SpellMenu);
                 }
                 3 => {
@@ -455,7 +601,7 @@ fn handle_combat_input(
             }
         }
         MenuFrame::SpellMenu => {
-            // Decision 34: Silence gates spell access.
+            // Decision 34: Silence gates spell access (MUST stay; real painter mirrors this).
             if is_silenced(status) {
                 combat_log.push(
                     "You are silenced; cannot cast.".into(),
@@ -464,12 +610,136 @@ fn handle_combat_input(
                 input_state.menu_stack = vec![MenuFrame::Main];
                 return;
             }
-            // Stub for v1; #20 fills in spell menu.
-            combat_log.push(
-                "Spell menu: not yet implemented.".into(),
-                input_state.current_turn,
-            );
-            input_state.menu_stack = vec![MenuFrame::Main];
+
+            // Feature #20 Phase 3 — real SpellMenu handler.
+
+            // Resolve SpellDb.
+            let spell_db = dungeon_assets
+                .as_ref()
+                .and_then(|a| spell_db_assets.get(&a.spells));
+
+            // If DB not loaded yet, stay in menu silently.
+            let Some(spell_db) = spell_db else {
+                return;
+            };
+
+            // Resolve KnownSpells for this actor.
+            let Ok(known_spells) = known_spells_q.get(actor_entity) else {
+                return;
+            };
+
+            // Build the castable list mirroring the painter's filter.
+            let castable: Vec<crate::data::SpellAsset> = known_spells
+                .spells
+                .iter()
+                .filter_map(|id| {
+                    let spell = spell_db.get(id);
+                    if spell.is_none()
+                        && warned.set.insert((id.clone(), actor_entity))
+                    {
+                        warn!(
+                            "Character {:?}'s KnownSpells references missing spell '{}' (filtered)",
+                            actor_entity, id
+                        );
+                    }
+                    spell.cloned()
+                })
+                .filter(|s| {
+                    s.mp_cost.min(crate::data::MAX_SPELL_MP_COST) <= derived.current_mp
+                })
+                .collect();
+
+            // Up/Down: cursor movement (Cat-C-6 = A: saturating, non-wrap).
+            if actions.just_pressed(&MenuNavAction::Up) {
+                input_state.spell_cursor = input_state.spell_cursor.saturating_sub(1);
+                return;
+            }
+            if actions.just_pressed(&MenuNavAction::Down) {
+                let ceiling = castable.len().saturating_sub(1);
+                input_state.spell_cursor = (input_state.spell_cursor + 1).min(ceiling);
+                return;
+            }
+
+            // Confirm: attempt to cast.
+            if actions.just_pressed(&MenuNavAction::Confirm) {
+                // Guard: nothing to confirm.
+                if castable.is_empty() {
+                    return;
+                }
+                let cursor = input_state
+                    .spell_cursor
+                    .min(castable.len().saturating_sub(1));
+                // Own the spell to free the borrow before mutating input_state.
+                let spell = castable[cursor].clone();
+
+                match spell.target {
+                    crate::data::SpellTarget::SingleEnemy => {
+                        // Cat-C-5 = A: pre-check alive-enemy list (mirror of Attack arm guard).
+                        let enemy_alive: Vec<Entity> = enemies
+                            .iter()
+                            .filter(|(_, d, _)| d.current_hp > 0)
+                            .map(|(e, _, _)| e)
+                            .collect();
+                        if enemy_alive.is_empty() {
+                            combat_log.push(
+                                format!(
+                                    "{}: no valid targets for {}",
+                                    actor_name.0, spell.display_name
+                                ),
+                                input_state.current_turn,
+                            );
+                            return; // Stay in SpellMenu.
+                        }
+                        // Push TargetSelect to let player pick the specific enemy.
+                        input_state.menu_stack.push(MenuFrame::TargetSelect {
+                            kind: CombatActionKind::CastSpell {
+                                spell_id: spell.id.clone(),
+                            },
+                        });
+                        input_state.target_cursor = Some(0);
+                    }
+                    crate::data::SpellTarget::SingleAlly => {
+                        // Push TargetSelect (ally picking); allies are resolved by
+                        // the existing TargetSelect arm's confirm logic.
+                        input_state.menu_stack.push(MenuFrame::TargetSelect {
+                            kind: CombatActionKind::CastSpell {
+                                spell_id: spell.id.clone(),
+                            },
+                        });
+                        input_state.target_cursor = Some(0);
+                    }
+                    crate::data::SpellTarget::AllEnemies
+                    | crate::data::SpellTarget::AllAllies
+                    | crate::data::SpellTarget::Self_ => {
+                        // Commit directly — no target prompt needed.
+                        let target = match spell.target {
+                            crate::data::SpellTarget::AllEnemies => {
+                                TargetSelection::AllEnemies
+                            }
+                            crate::data::SpellTarget::AllAllies => {
+                                TargetSelection::AllAllies
+                            }
+                            _ => TargetSelection::Self_,
+                        };
+                        let qa = QueuedAction {
+                            actor: actor_entity,
+                            kind: CombatActionKind::CastSpell {
+                                spell_id: spell.id.clone(),
+                            },
+                            target,
+                            speed_at_queue_time: derived.speed,
+                            actor_side: Side::Party,
+                            slot_index: active_slot as u32,
+                        };
+                        queue.queue.push(qa.clone());
+                        input_state.committed.push(qa);
+                        input_state.menu_stack = vec![MenuFrame::Main];
+                        input_state.spell_cursor = 0;
+                        input_state.active_slot = None;
+                    }
+                }
+            }
+            // Cancel is handled by the top-level Cancel block above.
         }
         MenuFrame::ItemMenu => {
             // Stub; full inventory UI is #25.
@@ -500,6 +770,8 @@ mod app_tests {
         app.init_asset::<crate::data::ItemDb>();
         app.init_asset::<crate::data::ItemAsset>();
         app.init_asset::<crate::data::EncounterTable>(); // Feature #16 (EncounterPlugin inside CombatPlugin)
+        // Feature #20 Phase 3 — SpellDb asset needed by paint_combat_screen/handle_combat_input.
+        app.init_asset::<crate::data::SpellDb>();
         // Mesh + StandardMaterial + Image + TextureAtlasLayout needed by bevy_sprite3d's bundle_builder
         // (EnemyRenderPlugin → Sprite3dPlugin via CombatPlugin; MinimalPlugins lacks PbrPlugin).
         app.init_asset::<bevy::prelude::Mesh>();
@@ -644,6 +916,83 @@ mod app_tests {
         assert!(
             matches!(input_state.menu_stack.last(), Some(MenuFrame::Main)),
             "menu_stack top must be Main after silence redirect"
+        );
+    }
+
+    /// D-I20 extension — Silence gate fires on the REAL painter (not just stub).
+    ///
+    /// Verifies that the `handle_combat_input` Silence check still pops `SpellMenu`
+    /// even when the actor has a non-empty `KnownSpells` (i.e., the real painter
+    /// path is reachable but gated by the Silence guard first). Decision 34 invariant.
+    #[test]
+    fn silence_blocks_real_spell_menu() {
+        use crate::plugins::party::character::ActiveEffect;
+        use crate::plugins::party::KnownSpells;
+
+        let mut app = make_test_app();
+
+        // Enter Combat.
+        app.world_mut()
+            .resource_mut::<NextState<crate::plugins::state::GameState>>()
+            .set(crate::plugins::state::GameState::Combat);
+        app.update();
+        app.update();
+
+        // Spawn a silenced party member with non-empty KnownSpells in slot 0.
+        // StatusEffects pre-loaded via vec![...] (sole-mutator grep guard D-I10).
+        let _actor = app
+            .world_mut()
+            .spawn(crate::plugins::party::PartyMemberBundle {
+                derived_stats: crate::plugins::party::DerivedStats {
+                    current_hp: 100,
+                    max_hp: 100,
+                    current_mp: 50,
+                    max_mp: 50,
+                    speed: 10,
+                    ..Default::default()
+                },
+                party_slot: crate::plugins::party::PartySlot(0),
+                status_effects: crate::plugins::party::StatusEffects {
+                    effects: vec![ActiveEffect {
+                        effect_type: crate::plugins::party::StatusEffectType::Silence,
+                        remaining_turns: Some(3),
+                        magnitude: 0.0,
+                    }],
+                },
+                // Non-empty KnownSpells — ensures the real painter path would be
+                // reached if Silence did NOT gate; this verifies Decision 34 still
+                // fires even with castable spells present.
+                known_spells: KnownSpells {
+                    spells: vec!["halito".into()],
+                },
+                ..Default::default()
+            })
+            .id();
+
+        // Set PlayerInputState: active_slot=0, menu_stack=[Main, SpellMenu].
+        {
+            let mut input_state =
+                app.world_mut()
+                    .resource_mut::<crate::plugins::combat::turn_manager::PlayerInputState>();
+            input_state.active_slot = Some(0);
+            input_state.menu_stack = vec![MenuFrame::Main, MenuFrame::SpellMenu];
+        }
+
+        // Run one frame — Silence gate fires before real painter logic, pops to Main.
+        app.update();
+
+        // Assert: menu_stack is back to [Main] only (Silence gated the real painter).
+        let input_state = app
+            .world()
+            .resource::<crate::plugins::combat::turn_manager::PlayerInputState>();
+        assert_eq!(
+            input_state.menu_stack.len(),
+            1,
+            "SpellMenu should be popped when actor is silenced (real painter path)"
+        );
+        assert!(
+            matches!(input_state.menu_stack.last(), Some(MenuFrame::Main)),
+            "menu_stack top must be Main after silence redirect (real painter path)"
         );
     }
 }

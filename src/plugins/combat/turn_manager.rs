@@ -153,6 +153,10 @@ pub struct PlayerInputState {
     /// Cursor for the Main action panel: 0=Attack, 1=Defend, 2=Spell, 3=Item, 4=Flee.
     /// Reset to 0 each time `active_slot` changes (per-member fresh state).
     pub main_cursor: usize,
+    /// Cursor into the filtered castable spell list shown in `MenuFrame::SpellMenu`.
+    /// Reset to 0 when entering `SpellMenu` (in Main arm case 2 dispatch).
+    /// Cat-C-6 = A: saturating non-wrap (consistent with main_cursor / Guild node_cursor).
+    pub spell_cursor: usize,
     /// Round counter (passed to combat_log entries for filtering).
     pub current_turn: u32,
 }

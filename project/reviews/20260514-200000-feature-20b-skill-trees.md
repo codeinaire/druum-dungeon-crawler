@@ -166,3 +166,54 @@ Phase 2 is clean. The DAG validation is correctly implemented and well-tested. S
 ```bash
 gh pr review 23 --repo codeinaire/druum-dungeon-crawler --comment --body-file /tmp/pr23-review-body.md
 ```
+
+---
+
+## Fixup Addendum — Commit e210cf4 (2026-05-14)
+
+**Scope:** Narrow re-review of fixup commit `e210cf4` only. Base commit `1ec43e8` is not re-examined.
+
+### LOW #1 — `sorted_nodes` precondition documentation
+
+**Status: RESOLVED.**
+
+`src/plugins/town/guild_skills.rs:160-170` — The `sorted_nodes` doc-comment now carries a `# Precondition` section. It states that the tree must be cycle-free (validated by `validate_no_cycles`), explains that a cyclic tree causes infinite recursion in `node_depth`, notes that both production call sites guard with `if tree.nodes.is_empty()` after `validate_skill_trees_on_load` empties cyclic trees, and advises test-fixture authors to run validators first. This matches the spec in the base review exactly. No code change was made to `node_depth` itself, as specified.
+
+### LOW #2 — `node_state` tamper-guard short-circuit
+
+**Status: RESOLVED.**
+
+`src/plugins/town/guild_skills.rs:114-125` — The `Err(SkillError::Insufficient)` arm now computes:
+
+```rust
+let invariant_ok =
+    experience.unspent_skill_points <= experience.total_skill_points_earned;
+if prereqs_met && level_met && invariant_ok {
+    NodeState::SpInsufficient
+} else {
+    NodeState::Locked(SkillError::Insufficient)
+}
+```
+
+This is a verbatim implementation of the spec from the base review. A tampered save (`unspent > total_earned`) with prereqs and level met now returns `Locked(SkillError::Insufficient)` instead of the misleading yellow `SpInsufficient`. Normal saves (`unspent <= total_earned`) are unaffected — `invariant_ok` is `true` and the existing `SpInsufficient` path is preserved.
+
+### Smoke test verification
+
+**Test:** `node_state_returns_locked_when_invariant_violated` at `src/plugins/town/guild_skills.rs:582-591`.
+
+The test constructs `make_exp(1, 5, 3)` — `unspent_skill_points=5`, `total_skill_points_earned=3`, invariant violated. The node (`id="c"`, `cost=1`, `min_level=1`, no prereqs) satisfies prereqs and level, so the only gate blocking `SpInsufficient` is the new `invariant_ok` binding. The assertion is `NodeState::Locked(SkillError::Insufficient)`. This correctly and specifically exercises the new tamper-guard path.
+
+Cross-check: the pre-existing `node_state_returns_sp_insufficient_when_prereq_met_but_sp_short` test uses `make_exp(1, 1, 1)` (`unspent == total_earned`), so `invariant_ok=true` and the result is still `SpInsufficient` — confirming no regression in the normal SP-short path. Test count moved 363 → 364 as expected.
+
+### Regression check
+
+The fixup touches only:
+
+1. The `sorted_nodes` doc-comment — no behavioral change.
+2. The `Err(SkillError::Insufficient)` arm in `node_state` — additive guard only; `invariant_ok=true` in all non-tampered states, leaving existing behavior identical.
+
+No other lines in `guild_skills.rs` were modified. No new imports, no signature changes. No regressions introduced.
+
+### Verdict: ADDENDUM-APPROVE
+
+Both LOW findings are fully resolved per spec. The smoke test correctly exercises the new code path. No new issues were introduced by the fixup. PR #23 is safe to merge.

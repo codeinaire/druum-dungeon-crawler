@@ -153,6 +153,18 @@ fn spawn_default_debug_party(
     let count = debug_party_count(party_size.0);
     for (i, (name, class, row)) in roster.iter().enumerate().take(count) {
         let derived = derive_stats(&base, &[], &StatusEffects::default(), 1);
+        // Feature #20 Phase 3 — grant class-appropriate default spells so the
+        // dev smoke test "open SpellMenu, see spells, cast them" works without
+        // first visiting the Guild. Fighters fall through to empty KnownSpells.
+        let known = match *class {
+            Class::Mage => KnownSpells {
+                spells: vec!["halito".into(), "katino".into()],
+            },
+            Class::Priest => KnownSpells {
+                spells: vec!["dios".into(), "matu".into()],
+            },
+            _ => KnownSpells::default(),
+        };
         commands
             .spawn(PartyMemberBundle {
                 name: CharacterName((*name).into()),
@@ -165,7 +177,10 @@ fn spawn_default_debug_party(
                 ..Default::default()
             })
             // Feature #12: each party member carries its own bag (Wizardry-style).
-            .insert(Inventory::default());
+            .insert(Inventory::default())
+            // Feature #20 Phase 3: override the bundle's default empty KnownSpells
+            // with class-appropriate starting spells for the dev smoke test.
+            .insert(known);
     }
 
     info!("Spawned {} debug party members", count);
