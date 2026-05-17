@@ -1,0 +1,17 @@
+docs(town): address review findings (#23) — node_depth precondition + tamper guard
+
+Add a `# Precondition` doc-comment to `sorted_nodes` clarifying the
+acyclic-tree invariant guaranteed in production by
+`validate_skill_trees_on_load`. Helps future test authors avoid
+infinite-recursion footguns when constructing cyclic SkillTree fixtures
+directly.
+
+Tighten the yellow `SpInsufficient` re-check arm in `node_state` to
+short-circuit to `Locked` when the tampered-save invariant
+(`unspent_skill_points <= total_skill_points_earned`) is violated. The
+unlock handler already rejects this case; this is a visual-consistency fix.
+
+Add a smoke test confirming `node_state` returns `Locked` (not yellow)
+when the unspent/total invariant is violated.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

@@ -17,6 +17,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::data::items::{ItemAsset, ItemStatBlock};
+// Feature #20 — imported lazily to avoid a circular-import; the `party/skills`
+// module imports `party/character::Experience`, so we import only the types
+// needed for the bundle extension. Full use path avoids re-export ambiguity.
+use crate::plugins::party::skills::{KnownSpells, UnlockedNodes};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3a. Identity components
@@ -153,6 +157,10 @@ pub struct DerivedStats {
 /// XP tracker with cached `xp_to_next_level` (OQ2: cached, not recomputed
 /// on every read). A pure `xp_for_level(level, curve) -> u64` helper is
 /// deferred to #14 (progression).
+///
+/// Feature #20 extended with skill-point tracking: `unspent_skill_points` and
+/// `total_skill_points_earned`. Both are `#[serde(default)]` so existing save
+/// data still loads (append-only, discriminant order preserved).
 #[derive(
     Component, Reflect, Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Hash,
 )]
@@ -162,6 +170,11 @@ pub struct Experience {
     /// Cached threshold for this level transition. Updated by the level-up
     /// system in #14 whenever `current_xp >= xp_to_next_level`.
     pub xp_to_next_level: u64,
+    // NEW for #20 — defaults to 0 so existing save data still loads.
+    #[serde(default)]
+    pub unspent_skill_points: u32,
+    #[serde(default)]
+    pub total_skill_points_earned: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +343,9 @@ pub struct PartyMemberBundle {
     pub party_slot: PartySlot,
     pub equipment: Equipment,
     pub status_effects: StatusEffects,
+    // Feature #20 — skill tree components (appended; do not reorder above fields).
+    pub known_spells: KnownSpells,
+    pub unlocked_nodes: UnlockedNodes,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

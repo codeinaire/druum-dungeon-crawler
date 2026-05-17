@@ -676,6 +676,10 @@ mod tests {
             class_table: Handle::default(),
             spells: Handle::default(),
             encounters_floor_01: Handle::default(), // Feature #16
+            // Feature #20 — skill tree handles (weak default handles for tests)
+            fighter_skills: Handle::default(),
+            mage_skills: Handle::default(),
+            priest_skills: Handle::default(),
         });
 
         // Drive into Dungeon and emit a move to (1, 0).

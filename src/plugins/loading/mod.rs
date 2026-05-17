@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 
-use crate::data::{ClassTable, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RaceTable, RecruitPool, ShopStock, SpellDb, TownServices};
+use crate::data::{ClassTable, CycleError, DungeonFloor, EncounterTable, EnemyDb, ItemDb, RaceTable, RecruitPool, ShopStock, SkillTree, SpellDb, TownServices, clamp_skill_tree, validate_no_cycles};
 use crate::plugins::dungeon::features::{PendingTeleport, TeleportRequested};
 use crate::plugins::state::GameState;
 
@@ -46,6 +46,29 @@ pub struct DungeonAssets {
     // Feature #20 — spell registry, replaces empty SpellTable stub
     #[asset(path = "spells/core.spells.ron")]
     pub spells: Handle<SpellDb>,
+    // Feature #20 — per-class skill trees
+    #[asset(path = "skills/fighter.skills.ron")]
+    pub fighter_skills: Handle<SkillTree>,
+    #[asset(path = "skills/mage.skills.ron")]
+    pub mage_skills: Handle<SkillTree>,
+    #[asset(path = "skills/priest.skills.ron")]
+    pub priest_skills: Handle<SkillTree>,
+}
+
+impl DungeonAssets {
+    /// Return the `Handle<SkillTree>` for the given class, or `None` for
+    /// classes without a day-one authored tree.
+    ///
+    /// **Never use an exhaustive `match` on `Class` without a wildcard arm**
+    /// (`Class` enum has 8 variants, only 3 are authored).
+    pub fn skill_tree_for(&self, class: crate::plugins::party::Class) -> Option<&Handle<SkillTree>> {
+        match class {
+            crate::plugins::party::Class::Fighter => Some(&self.fighter_skills),
+            crate::plugins::party::Class::Mage => Some(&self.mage_skills),
+            crate::plugins::party::Class::Priest => Some(&self.priest_skills),
+            _ => None,
+        }
+    }
 }
 
 /// Audio asset handles populated by `bevy_asset_loader` once all .ogg files
@@ -139,6 +162,7 @@ impl Plugin for LoadingPlugin {
                 RonAssetPlugin::<RecruitPool>::new(&["recruit_pool.ron"]),  // Feature #18
                 RonAssetPlugin::<TownServices>::new(&["town_services.ron"]), // Feature #18
                 RonAssetPlugin::<RaceTable>::new(&["racelist.ron"]),        // Feature #19 — race table for character creation
+                RonAssetPlugin::<SkillTree>::new(&["skills.ron"]),          // Feature #20 — per-class skill trees
             ))
             // (2) Drive GameState::Loading -> TitleScreen once all
             //     handles in DungeonAssets report LoadedWithDependencies.
@@ -156,6 +180,8 @@ impl Plugin for LoadingPlugin {
             //     OnExit(Loading) — both tagged LoadingScreenRoot.
             .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
             .add_systems(OnExit(GameState::Loading), despawn_loading_screen)
+            // Feature #20 — validate skill tree DAGs + clamp on exit from Loading.
+            .add_systems(OnExit(GameState::Loading), validate_skill_trees_on_load)
             // Feature #13 cross-floor teleport (D3-α):
             .add_systems(
                 Update,
@@ -248,6 +274,69 @@ fn spawn_loading_screen(mut commands: Commands) {
 fn despawn_loading_screen(mut commands: Commands, roots: Query<Entity, With<LoadingScreenRoot>>) {
     for e in &roots {
         commands.entity(e).despawn();
+    }
+}
+
+/// Validate all three per-class skill trees on `OnExit(GameState::Loading)`.
+///
+/// Runs `validate_no_cycles` (Kahn's algorithm) + `clamp_skill_tree` for each
+/// loaded tree. On cycle detection: logs `error!` and empties the tree so that
+/// the Guild Skills painter gracefully shows "(skill tree unavailable)".
+///
+/// **Validator scope (Cat-C-3 decision):** structural correctness only —
+/// cycles, unknown prerequisites, and size clamps. Does NOT walk
+/// `NodeGrant::LearnSpell` IDs against `SpellDb`. Bogus spell IDs surface at
+/// Phase 3 `SpellMenu` painter via the `WarnedMissingSpells` resource.
+fn validate_skill_trees_on_load(
+    dungeon_assets: Option<Res<DungeonAssets>>,
+    mut skill_trees: ResMut<Assets<SkillTree>>,
+) {
+    let Some(assets) = dungeon_assets else {
+        warn!("validate_skill_trees_on_load: DungeonAssets not yet available; skipping");
+        return;
+    };
+
+    let handles = [
+        (&assets.fighter_skills, "fighter"),
+        (&assets.mage_skills, "mage"),
+        (&assets.priest_skills, "priest"),
+    ];
+
+    for (handle, class_name) in handles {
+        let Some(tree) = skill_trees.get_mut(handle) else {
+            warn!("validate_skill_trees_on_load: {class_name} skill tree not loaded yet");
+            continue;
+        };
+
+        // Clamp first (truncates oversized node list, caps costs/min_levels).
+        clamp_skill_tree(tree);
+
+        // Then validate DAG structure.
+        match validate_no_cycles(tree) {
+            Ok(()) => {
+                info!(
+                    "validate_skill_trees_on_load: {class_name} tree OK ({} nodes)",
+                    tree.nodes.len()
+                );
+            }
+            Err(CycleError::CycleDetected { ref involved }) => {
+                error!(
+                    "validate_skill_trees_on_load: {class_name} skill tree has a CYCLE involving nodes {:?}; emptying tree",
+                    involved
+                );
+                tree.nodes.clear();
+            }
+            Err(CycleError::UnknownPrerequisite {
+                ref node,
+                ref prereq,
+            }) => {
+                error!(
+                    "validate_skill_trees_on_load: {class_name} skill tree node '{}' references unknown prerequisite '{}'; emptying tree",
+                    node, prereq
+                );
+                tree.nodes.clear();
+            }
+        }
     }
 }
 

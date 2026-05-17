@@ -100,6 +100,8 @@ pub struct GuildState {
     pub mode: GuildMode,
     /// Cursor index into the current mode's list (active party or recruit pool).
     pub cursor: usize,
+    /// Cursor index into the skill tree node list (Feature #20 Skills mode).
+    pub node_cursor: usize,
 }
 
 /// Which panel the Guild is showing.
@@ -123,6 +125,9 @@ pub enum GuildMode {
     CreateName,
     /// Step 5/5: review + commit (push to RecruitPool).
     CreateConfirm,
+    // Feature #20 — skill tree viewer + SP spend.
+    /// Skill tree viewer for the active party.
+    Skills,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,6 +177,8 @@ pub fn paint_guild(
                 GuildMode::CreateAllocate => "Guild — Create Character — Step 4 of 6: Allocate",
                 GuildMode::CreateName => "Guild — Create Character — Step 5 of 6: Name",
                 GuildMode::CreateConfirm => "Guild — Create Character — Step 6 of 6: Confirm",
+                // Feature #20 — skill tree sub-mode label.
+                GuildMode::Skills => "Guild — Skill Trees",
             };
             ui.heading(mode_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -183,13 +190,15 @@ pub fn paint_guild(
     // Feature #19 — creation sub-modes render their own CentralPanel via
     // dedicated painters in guild_create.rs. Skip the CentralPanel here to
     // avoid a double-CentralPanel egui layout error.
+    // Feature #20 — Skills mode also renders its own CentralPanel via guild_skills.rs.
     match guild_state.mode {
         GuildMode::CreateRace
         | GuildMode::CreateClass
         | GuildMode::CreateRoll
         | GuildMode::CreateAllocate
         | GuildMode::CreateName
-        | GuildMode::CreateConfirm => return Ok(()),
+        | GuildMode::CreateConfirm
+        | GuildMode::Skills => return Ok(()),
         _ => {}
     }
 
@@ -228,7 +237,7 @@ pub fn paint_guild(
                 }
 
                 ui.add_space(8.0);
-                ui.label("[Up/Down] Pick  |  [G] Dismiss  |  [F] Toggle Row  |  [T] Slot Swap target  |  [R] Recruit mode  |  []] New character  |  [Esc] Back");
+                ui.label("[Up/Down] Pick  |  [G] Dismiss  |  [F] Toggle Row  |  [T] Slot Swap target  |  [R] Recruit mode  |  []] New character  |  [[] Skills  |  [Esc] Back");
             }
             GuildMode::Recruit => {
                 let recruit_pool = town_assets
@@ -308,6 +317,8 @@ pub fn handle_guild_input(
                 | GuildMode::CreateAllocate
                 | GuildMode::CreateName
                 | GuildMode::CreateConfirm
+                // Feature #20 — Skills mode owns its own Cancel via handle_guild_skills_input.
+                | GuildMode::Skills
         )
     {
         next_sub.set(TownLocation::Square);
@@ -325,6 +336,18 @@ pub fn handle_guild_input(
         return;
     }
 
+    // Feature #20 — '[' (PrevTarget) while in Roster enters Skills mode.
+    // Rationale: PrevTarget is already bound in default_menu_input_map; repurposing it
+    // here avoids any change to InputMap (Δ Input = 0). See plan §Step 3.7.
+    if actions.just_pressed(&MenuAction::PrevTarget)
+        && guild_state.mode == GuildMode::Roster
+    {
+        guild_state.mode = GuildMode::Skills;
+        guild_state.cursor = 0;
+        guild_state.node_cursor = 0;
+        return;
+    }
+
     // R toggles between Roster and Recruit mode (MenuAction::Recruit, KeyR).
     // In creation wizard sub-modes, R is consumed by handle_guild_create_roll — skip.
     if actions.just_pressed(&MenuAction::Recruit) {
@@ -339,13 +362,15 @@ pub fn handle_guild_input(
     }
 
     // In creation sub-modes, cursor movement and Cancel are handled by guild_create.rs.
+    // Feature #20: Skills mode cursor and Cancel are handled by guild_skills.rs.
     match guild_state.mode {
         GuildMode::CreateRace
         | GuildMode::CreateClass
         | GuildMode::CreateRoll
         | GuildMode::CreateAllocate
         | GuildMode::CreateName
-        | GuildMode::CreateConfirm => return,
+        | GuildMode::CreateConfirm
+        | GuildMode::Skills => return,
         _ => {}
     }
 
@@ -462,6 +487,7 @@ pub fn handle_guild_recruit(
         level: 1,
         current_xp: 0,
         xp_to_next_level: xp_to_next_level_for(class_def, 1),
+        ..Default::default()
     };
 
     commands

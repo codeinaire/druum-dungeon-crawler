@@ -155,6 +155,10 @@ fn setup_dungeon_assets_and_enter(
         enemy_db: Handle::default(),
         class_table: Handle::default(),
         spells: Handle::default(),
+        // Feature #20 — skill tree handles (weak default handles for tests)
+        fighter_skills: Handle::default(),
+        mage_skills: Handle::default(),
+        priest_skills: Handle::default(),
     });
     next_game_state.set(GameState::Dungeon);
 }

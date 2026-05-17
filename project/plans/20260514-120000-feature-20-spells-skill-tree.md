@@ -1,7 +1,7 @@
 # Plan: Feature #20 — Spells & Skill Trees
 
 **Date:** 2026-05-14
-**Status:** Confirmed — user decisions locked 2026-05-14 (see "User Decisions" below). Shipping as THREE SEPARATE PRs (Phase 1 / Phase 2 / Phase 3), each with its own implement → review → ship cycle. Orchestrator pauses between phases for explicit user go-ahead.
+**Status:** Phase 2 Implemented — user decisions locked 2026-05-14. Phase 1 (spell registry) shipped as PR #21. Phase 2 (skill trees + Guild Skills) implemented 2026-05-14; pending cargo check/test verification and PR creation. Phase 3 (SpellMenu UI) pending user go-ahead. Orchestrator pauses between phases for explicit user confirmation.
 **Research:** project/research/20260514-druum-20-spells-skill-tree.md
 **Depends on:** 20260513-120000-feature-19-character-creation.md, 20260512-173000-feature-18b-town-temple-guild.md, 20260508-100000-feature-15-turn-based-combat-core.md
 
@@ -21,6 +21,13 @@ All planner defaults from the original "Open Questions" section are **ACCEPTED**
 | GH issue reconciliation | No separate spec issue | `gh issue view 20` returns PR #20 (merged #19). Roadmap (`project/roadmaps/20260429-01-bevy-dungeon-crawler-roadmap.md` lines 1079–1127) is the source of truth. |
 
 Cat-A planner-resolved items (Q2 race-spells, Q4 no group targeting, Q5 spells ignore rows, Q7 no respec, Q8 no trees for the 5 unauthored classes) also stand.
+
+### Phase 2 Cat-C resolutions (locked 2026-05-14, post-Phase-1-ship)
+
+| Question | Decision | Notes |
+|---|---|---|
+| **Cat-C-1** — Painter state count | **Option B — 4-state painter with yellow tier** | Unlocked / can-unlock-now / SP-insufficient-but-otherwise-met (**yellow**) / locked. Helps users plan SP saves across level-ups. Adds 2 `node_state` pure-fn unit tests. See Step 3.5. |
+| **Cat-C-3** — `NodeGrant::LearnSpell(SpellId)` validation scope | **Option A — warn-and-filter at consume-time only** | Validator (`validate_skill_trees_on_load`) stays structural: cycles + clamp only. Bogus spell IDs flow into `KnownSpells` and surface in Phase 3's `SpellMenu` painter via the Q9 `WarnedMissingSpells: HashSet<(SpellId, Entity)>` warn-once mechanism. Single source of truth for missing-spell handling. See Step 3.4. |
 
 ## Goal
 
@@ -94,7 +101,7 @@ Each phase is its own branch, its own commit, its own PR, its own implement → 
 - `assets/skills/mage.skills.ron` — NEW (8 nodes, mix of LearnSpell + StatBoost). ~+80 LOC.
 - `assets/skills/priest.skills.ron` — NEW (8 nodes, similar mix). ~+80 LOC.
 - `src/plugins/loading/mod.rs` — `RonAssetPlugin::<SkillTree>` registration; add 3 per-class `Handle<SkillTree>` fields to `DungeonAssets`; `skill_tree_for(class)` helper; `OnExit(GameState::Loading)` validation system that runs `validate_no_cycles + clamp_skill_tree`. ~+42 modified LOC.
-- `src/plugins/town/guild_skills.rs` — NEW (`paint_guild_skills`, `handle_guild_skills_input`, `handle_guild_skills_unlock` + 5 integration tests). ~+250 LOC.
+- `src/plugins/town/guild_skills.rs` — NEW (`paint_guild_skills`, `handle_guild_skills_input`, `handle_guild_skills_unlock`, private pure `node_state(node, experience, unlocked) -> NodeState` for the Cat-C-1 4-state painter + 5 integration tests + 2 `node_state` unit tests). ~+270 LOC.
 - `src/plugins/town/guild.rs` — extend `GuildMode` enum with `Skills` variant; `node_cursor` field on `GuildState`; `[` keybind entry from Roster. ~+12 modified LOC.
 - `src/plugins/town/mod.rs` — register `pub mod guild_skills;` + paint/input/unlock systems + run-if gates. ~+10 modified LOC.
 - `tests/skill_tree_loads.rs` — NEW integration test (mirror of `tests/class_table_loads.rs`). ~+90 LOC.
@@ -102,7 +109,7 @@ Each phase is its own branch, its own commit, its own PR, its own implement → 
 **Types introduced in Phase 2:** `NodeId`, `NodeGrant`, `SkillNode`, `SkillTree`, `CycleError`, `KnownSpells`, `UnlockedNodes`, `WarnedMissingSpells`, `SkillError`.
 **Constants introduced in Phase 2:** `MAX_SKILL_TREE_NODES`, `MAX_SKILL_NODE_COST`, `MAX_SKILL_NODE_MIN_LEVEL`, `SKILL_POINTS_PER_LEVEL`.
 
-**Test counts at Phase 2 completion:** 8 (`data/skills.rs`) + 8 (`party/skills.rs`) + 5 (`guild_skills.rs` integration) + 1 (extended progression test for SP award) + 1 (`tests/skill_tree_loads.rs`) = **23 new tests** in Phase 2. (Plus Phase 1's 19 still passing.)
+**Test counts at Phase 2 completion:** 8 (`data/skills.rs`) + 8 (`party/skills.rs`) + 5 (`guild_skills.rs` integration) + 2 (`guild_skills.rs` `node_state` unit tests — Cat-C-1 4-state painter) + 1 (extended progression test for SP award) + 1 (`tests/skill_tree_loads.rs`) = **25 new tests** in Phase 2. (Plus Phase 1's 19 still passing.)
 
 **Δ Cargo.toml = 0** at Phase 2.
 
@@ -110,13 +117,21 @@ Each phase is its own branch, its own commit, its own PR, its own implement → 
 
 - [ ] All Phase 1 gates still pass (run all tests including Phase 1's)
 - [ ] `cargo test --lib skills` — 16 new tests
-- [ ] `cargo test --lib guild_skills` — 5 new integration tests
+- [ ] `cargo test --lib guild_skills` — 5 new integration tests + 2 `node_state` pure-fn unit tests = 7 total
 - [ ] `cargo test --test skill_tree_loads` — RON load smoke + DAG validation
 - [ ] Anti-pattern grep on the new files (skills.rs × 2, guild_skills.rs): zero matches for `derive(Event)`, `EventReader<`, `EventWriter<`
 - [ ] Sole-mutator grep: zero matches for `effects.push|effects.retain` in the new files
 - [ ] Manual smoke: `cargo run --features dev` — no panic loading any of the 3 skill-tree RONs; Guild Roster footer shows `"[ ] Skills"` keybind hint; pressing `[` enters Skills mode; cursor + Confirm spend a point on a root node and decrements `unspent_skill_points`
 
 **Phase 2 is partially user-facing** — Guild Skills mode is fully functional (you can spend points and watch nodes light up); combat still can't cast spells because Phase 3 hasn't shipped. KnownSpells populates correctly when an unlock is `LearnSpell`, but the combat menu still says "Not implemented." Document this in the PR body.
+
+**Stacked-PR protocol (Phase 2 ship)** — Phase 2 is shipped as a **stacked PR on top of Phase 1**. Until Phase 1's PR #21 merges, Phase 2's PR targets `feature-20a-spell-registry` as its base; when #21 merges to `main`, GitHub auto-retargets Phase 2 to `main`. Concrete rules:
+
+- **Branch from `feature-20a-spell-registry`, NOT from `main`.** `but branch new feature-20b-skill-trees` MUST be run while the working tree is on the `feature-20a-spell-registry` state. Verify with `but status` BEFORE creating the branch — `feature-20a-spell-registry` must be the only branch with applied commits in the workspace. If any other branch shows applied commits, stop and re-check; do NOT create the Phase 2 branch from a polluted state.
+- **PR creation:** `gh pr create --base feature-20a-spell-registry --head feature-20b-skill-trees --title "feat(party): add skill trees, skill points, and Guild Skills mode (#20b)" --body-file <path>`.
+- **Auto-retarget on Phase 1 merge:** when PR #21 merges into `main`, GitHub automatically retargets PR #20b's base from `feature-20a-spell-registry` to `main`. No manual action required.
+- **Rebase discipline:** if Phase 1 receives further fixup commits before merging, Phase 2's branch must be rebased onto the updated `feature-20a-spell-registry` tip before pushing. The shipper agent enforces this.
+- **Phase 3 stacking — TBD.** Default policy: stack Phase 3 on Phase 2 (`--base feature-20b-skill-trees`). The orchestrator MUST confirm this with the user before shipping Phase 3 — if the user prefers Phase 3 to wait for Phase 2 to merge first, the branch is created from `main` after merge instead.
 
 ### Phase 3 — Combat UI: functional SpellMenu
 
@@ -387,13 +402,47 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
 *Scope:* Steps 2.1–2.5 below PLUS Steps 3.1–3.9 below.
 *Phase 2 SPLIT NOTE:* Steps 2.6 (`MenuFrame::SpellMenu` replacement) and 2.7 (dev-party default `KnownSpells`) are **DEFERRED TO PHASE 3**. KnownSpells/UnlockedNodes get populated in Phase 2 (via Guild Skills unlock) but combat-side consumption is Phase 3 work. The original step numbers below keep their identity for traceability — they are simply executed in the Phase 3 PR.
 
-- [ ] **2.1** Create `src/plugins/party/skills.rs` (~+150 new LOC, NEW). Top-of-file doc-comment cites plan #20. Define:
+**EXECUTION ORDER (compile-independent per step):**
+
+The step *numbers* preserve traceability with the research/research-derived structure, but the *execution order* differs from the number sequence because Step 2.1's `can_unlock_node(node: &SkillNode, ...)` and Step 2.3's `PartyMemberBundle.unlocked_nodes: UnlockedNodes` signatures depend on `SkillNode` and `NodeGrant` which are defined in Step 3.1 (`src/data/skills.rs`). To keep every individual step compile-clean when the implementer commits step-by-step, run in this order:
+
+1. **3.1** — `src/data/skills.rs` (NEW) — `SkillNode`, `NodeGrant`, `SkillTree`, `CycleError`, `validate_no_cycles`, `clamp_skill_tree`, MAX_* consts, 8 unit tests.
+2. **3.2** — `src/data/mod.rs` — register `pub mod skills;` + re-exports. (Required so Step 2.1's `use crate::data::skills::SkillNode;` resolves.)
+3. **2.1** — `src/plugins/party/skills.rs` (NEW) — `KnownSpells`, `UnlockedNodes`, `WarnedMissingSpells`, `SkillError`, `can_unlock_node`, `learn_spell_pure`, `allocate_skill_point_pure`, 8 unit tests.
+4. **2.2** — `src/plugins/party/mod.rs` — register `pub mod skills;` + re-exports + `WarnedMissingSpells` plugin wiring.
+5. **2.3** — `src/plugins/party/character.rs` — extend `PartyMemberBundle` with `KnownSpells` + `UnlockedNodes` fields.
+6. **2.4** — `src/plugins/party/character.rs` — append `unspent_skill_points` + `total_skill_points_earned` to `Experience` (with `#[serde(default)]`).
+7. **2.5** — `src/plugins/party/progression.rs` — declare `SKILL_POINTS_PER_LEVEL` + award SP on level-up.
+8. **3.3** — Author the 3 `.skills.ron` asset files.
+9. **3.4** — `src/plugins/loading/mod.rs` — register `RonAssetPlugin<SkillTree>`, add `Handle<SkillTree>` fields to `DungeonAssets`, `skill_tree_for(class)` helper, `validate_skill_trees_on_load` system.
+10. **3.5** — `src/plugins/town/guild_skills.rs` (NEW) — paint/input/unlock systems + 5 integration tests.
+11. **3.6** — `src/plugins/town/guild.rs` — extend `GuildMode` with `Skills` variant + `mode_label` arm + CentralPanel-skip block.
+12. **3.7** — `src/plugins/town/guild.rs` — `[` keybind entry from Roster.
+13. **3.8** — `src/plugins/town/mod.rs` — wire `paint_guild_skills` + handlers under `in_guild_mode(GuildMode::Skills)` run-ifs.
+14. **3.9** — `tests/skill_tree_loads.rs` (NEW) — integration test for RON load + DAG validation.
+
+Each step in this order compiles green on its own. Steps left in their original numeric position below — do NOT renumber. The implementer must follow the order above, not the textual order of the headings.
+
+**Stacked-PR rebase discipline (Phase 2 ship):**
+
+Phase 2 stacks on `feature-20a-spell-registry`. If Phase 1 (PR #21) receives any further fixup commits between Phase 2 branch creation and Phase 2 push, Phase 2 MUST be rebased onto the updated `feature-20a-spell-registry` tip BEFORE `but push`. Concrete steps (run from within `gitbutler/workspace`):
+
+1. `git fetch origin` — refresh the remote's view of `feature-20a-spell-registry`.
+2. `but status` — confirm `feature-20a-spell-registry` is the only branch with applied commits, and `feature-20b-skill-trees` is the active stack.
+3. If `feature-20a-spell-registry`'s tip on origin differs from local: rebase Phase 2's commits onto it via GitButler's rebase flow (or `but pull` on the Phase 1 branch first, then re-apply Phase 2's commits).
+4. Re-run `cargo check`, `cargo test --lib`, and `cargo clippy --all-targets -- -D warnings` after rebase.
+5. Only then `but push -u origin feature-20b-skill-trees` (or `btp feature-20b-skill-trees`).
+6. The PR's base on GitHub remains `feature-20a-spell-registry` — `gh pr create --base feature-20a-spell-registry --head feature-20b-skill-trees ...` (no `--base main`). GitHub auto-retargets the base to `main` when PR #21 merges; no manual action required.
+
+Verification gates for Steps 3.1, 2.1, 2.3, 2.5, 3.4, 3.5 each include a "must compile green at this step's commit" criterion (see "Verification" section). The orchestrator's run-shipper skill is expected to validate this gate before pushing.
+
+- [x] **2.1** Create `src/plugins/party/skills.rs` (~+150 new LOC, NEW). Top-of-file doc-comment cites plan #20. Define:
   - `pub mod skills_v1;` style imports as needed.
   - `pub struct KnownSpells { pub spells: Vec<SpellId> }` with `Component, Reflect, Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq`.
   - `impl KnownSpells { pub fn knows(&self, id: &str) -> bool { ... }; pub fn learn(&mut self, id: SpellId) { if !self.knows(&id) && self.spells.len() < KNOWN_SPELLS_MAX { self.spells.push(id); } }; pub fn forget(&mut self, id: &str) { self.spells.retain(|s| s != id); } }`. (forget is for tests + future polish; harmless to ship.)
   - `pub struct UnlockedNodes { pub nodes: Vec<NodeId> }` with same derives as `KnownSpells`.
   - `impl UnlockedNodes { pub fn has(&self, id: &str) -> bool { ... }; pub fn unlock(&mut self, id: NodeId, max_nodes: usize) { if !self.has(&id) && self.nodes.len() < max_nodes { self.nodes.push(id); } } }`.
-  - `pub struct WarnedMissingSpells { pub set: std::collections::HashSet<SpellId> }` as a `Resource, Default, Debug` — used by the resolver to `warn!` once per missing spell ID (per Q9 default).
+  - `pub struct WarnedMissingSpells { pub set: std::collections::HashSet<(SpellId, Entity)> }` as a `Resource, Default, Debug` — used by the SpellMenu painter (Phase 3) to `warn!` once per missing spell ID **per character** (per Q9 default = "warn-once-per-(spell,character)-then-filter"). The `Entity` half of the tuple is the character that owns the offending `KnownSpells.spells` reference; the resource is consulted as `if warned.set.insert((id.clone(), actor_entity)) { warn!(...) }` so each `(spell,character)` pair logs exactly once per process. Import `use bevy::prelude::Entity;` at the top of `party/skills.rs`.
   - `pub fn learn_spell_pure(known: &mut KnownSpells, id: SpellId) { known.learn(id); }` — pure-fn wrapper for tests.
   - `pub fn allocate_skill_point_pure(experience: &mut Experience, node: &SkillNode) -> Result<(), SkillError>` — returns `Err(SkillError::Insufficient)` if `experience.unspent_skill_points < node.cost`, else decrements `unspent_skill_points`.
   - `pub enum SkillError { Insufficient, BelowMinLevel, MissingPrerequisite, AlreadyUnlocked, CapReached }`.
@@ -401,7 +450,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   - 8+ unit tests (see Verification).
   **Files:** `src/plugins/party/skills.rs` (+150 new LOC, NEW).
 
-- [ ] **2.2** Register `pub mod skills;` in `src/plugins/party/mod.rs` (~+5 modified LOC). Add after `pub mod progression;`:
+- [x] **2.2** Register `pub mod skills;` in `src/plugins/party/mod.rs` (~+5 modified LOC). Add after `pub mod progression;`:
   ```rust
   pub mod skills;
   ```
@@ -420,11 +469,11 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   ```
   **Files:** `src/plugins/party/mod.rs` (+5 modified LOC).
 
-- [ ] **2.3** Extend `PartyMemberBundle` at `src/plugins/party/character.rs:320-333` with `pub known_spells: KnownSpells` and `pub unlocked_nodes: UnlockedNodes` (~+4 modified LOC). Both default to empty vectors. APPENDS — do not reorder existing fields. Per the bundle precedent at character.rs:320 (`#[derive(Bundle, Default)]`), the default impl is auto-derived. Add the imports: `use crate::plugins::party::skills::{KnownSpells, UnlockedNodes};` near the file's existing imports.
+- [x] **2.3** Extend `PartyMemberBundle` at `src/plugins/party/character.rs:320-333` with `pub known_spells: KnownSpells` and `pub unlocked_nodes: UnlockedNodes` (~+4 modified LOC). Both default to empty vectors. APPENDS — do not reorder existing fields. Per the bundle precedent at character.rs:320 (`#[derive(Bundle, Default)]`), the default impl is auto-derived. Add the imports: `use crate::plugins::party::skills::{KnownSpells, UnlockedNodes};` near the file's existing imports.
   **NOTE:** `PartyMemberBundle` is the "frozen by #12" spawning helper per the [[druum-feature-12-inventory-equipment]] memory; the same APPENDING pattern that #19 used for `Experience` applies here. `.insert(Inventory::default())` chains remain unchanged.
   **Files:** `src/plugins/party/character.rs` (+4 modified LOC).
 
-- [ ] **2.4** Append two fields to `Experience` at `src/plugins/party/character.rs:159-165` (~+6 modified LOC). Append AT END:
+- [x] **2.4** Append two fields to `Experience` at `src/plugins/party/character.rs:159-165` (~+6 modified LOC). Append AT END:
   ```rust
   // NEW for #20 — defaults to 0 so existing save data still loads.
   #[serde(default)]
@@ -435,7 +484,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   Update the doc-comment above `Experience` to call out the #20 extension (~+2 lines).
   **Files:** `src/plugins/party/character.rs` (+6 modified LOC).
 
-- [ ] **2.5** Add skill-point award to `apply_level_up_threshold_system` at `src/plugins/party/progression.rs:438-471` (~+5 modified LOC).
+- [x] **2.5** Add skill-point award to `apply_level_up_threshold_system` at `src/plugins/party/progression.rs:438-471` (~+5 modified LOC).
 
   **Phase-ordering dependency:** this step references `SKILL_POINTS_PER_LEVEL` which lives in `src/data/skills.rs` (Step 3.1 — Phase 3). To keep Phase 2 self-compilable, declare `SKILL_POINTS_PER_LEVEL` **HERE in Phase 2** at the top of `progression.rs` as a `pub const SKILL_POINTS_PER_LEVEL: u32 = 1;`. Phase 3 Step 3.1 then re-exports it from `data/skills.rs` via `pub use crate::plugins::party::progression::SKILL_POINTS_PER_LEVEL;` (or simply lives in BOTH places with a comment cross-link). Alternative: move Step 2.5 INTO Phase 3 (after Step 3.1) — but that defeats the goal of Phase 2 unlocking playable spell-casting + per-level skill-point accumulation independently. **Decision: declare in `progression.rs` (Phase 2); Step 3.1's MAX_* block in `skills.rs` re-references via `pub use`.**
 
@@ -479,7 +528,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   In `paint_combat_screen` (or its delegate), when `frame == MenuFrame::SpellMenu`:
   - Resolve `spell_db` via `dungeon_assets.and_then(|a| spell_db_assets.get(&a.spells))`. If None: paint "Spells: loading..." and return.
   - Get `known_spells = known_spells_q.get(actor_entity).ok()`. If None: paint "(no spells)" and return.
-  - Build `castable: Vec<&SpellAsset> = known_spells.spells.iter().filter_map(|id| { let spell = spell_db.get(id); if spell.is_none() && warned.set.insert(id.clone()) { warn!("KnownSpells references missing spell '{}' (filtered)", id); } spell }).filter(|s| s.mp_cost.min(MAX_SPELL_MP_COST) <= derived.current_mp).collect();`. (Per Q9 default — warn once, filter silently.)
+  - Build `castable: Vec<&SpellAsset> = known_spells.spells.iter().filter_map(|id| { let spell = spell_db.get(id); if spell.is_none() && warned.set.insert((id.clone(), actor_entity)) { warn!("Character {:?}'s KnownSpells references missing spell '{}' (filtered)", actor_entity, id); } spell }).filter(|s| s.mp_cost.min(MAX_SPELL_MP_COST) <= derived.current_mp).collect();`. (Per Q9 default — warn once per `(spell_id, character)` pair, filter silently.)
   - Render a centered egui `Window` titled "Spells": cursor-highlighted list of `"{display_name} (MP {mp_cost})"`, plus the cursor entry's `description` below.
   - Footer label: `"[Up/Down] Pick  |  [Enter] Select target  |  [Esc] Back"`.
   In `handle_combat_input`'s `MenuFrame::SpellMenu` arm:
@@ -497,7 +546,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
 
 *(Continued from Phase 2 part A above.)* Steps 3.1–3.9 below belong in the same PR #20b — they implement the skill-tree data shape, per-class RON assets, loader registration, and the Guild Skills painter/handlers. Note: the original heading said "Phase 3" but under the user's three-PR split, "Phase 3" is reserved for the combat SpellMenu UI (Steps 2.6 + 2.7). The step numbers below keep their identity for traceability.
 
-- [ ] **3.1** Create `src/data/skills.rs` (~+250 new LOC, NEW). Top-of-file doc-comment cites plan #20 + Pattern 3 from research. Define in order:
+- [x] **3.1** Create `src/data/skills.rs` (~+250 new LOC, NEW). Top-of-file doc-comment cites plan #20 + Pattern 3 from research. Define in order:
   - MAX_* constants block (see plan §MAX_* above) — note: `SKILL_POINTS_PER_LEVEL` is re-exported from `progression.rs` (declared there in Phase 2 Step 2.5 to dodge a Phase 2 → Phase 3 forward dep):
     ```rust
     pub use crate::plugins::party::progression::SKILL_POINTS_PER_LEVEL;
@@ -547,7 +596,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   - 7+ unit tests (see Verification): `skill_tree_round_trips_through_ron`, `validate_no_cycles_accepts_linear`, `validate_no_cycles_rejects_self_loop`, `validate_no_cycles_rejects_two_node_cycle`, `validate_no_cycles_rejects_three_node_cycle`, `validate_no_cycles_rejects_unknown_prereq`, `clamp_skill_tree_truncates_oversized`, `clamp_skill_tree_caps_per_node_cost`.
   **Files:** `src/data/skills.rs` (+250 new LOC, NEW).
 
-- [ ] **3.2** Update `src/data/mod.rs` to register the new module (~+4 modified LOC). Add `pub mod skills;` after `pub mod races;`. Add re-export:
+- [x] **3.2** Update `src/data/mod.rs` to register the new module (~+4 modified LOC). Add `pub mod skills;` after `pub mod races;`. Add re-export:
   ```rust
   pub use skills::{
       CycleError, MAX_SKILL_NODE_COST, MAX_SKILL_NODE_MIN_LEVEL, MAX_SKILL_TREE_NODES,
@@ -558,7 +607,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   Order alphabetically (between `races` and `spells`). Update the module-doc-comment to list `skills` line: `- skills — SkillTree, SkillNode, NodeGrant (Feature #20)`.
   **Files:** `src/data/mod.rs` (+4 modified LOC).
 
-- [ ] **3.3** Author the 3 per-class skill trees as new RON files (~+200 new LOC across 3 files). All double-dotted per [[druum-ron-assets-need-double-dot-extension]].
+- [x] **3.3** Author the 3 per-class skill trees as new RON files (~+200 new LOC across 3 files). All double-dotted per [[druum-ron-assets-need-double-dot-extension]].
   - `assets/skills/fighter.skills.ron` (~6 nodes, passives + Resists ONLY; per planner-resolved Q1 default = all 3 classes). Sample shape:
     ```ron
     (
@@ -580,7 +629,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   Each file starts with a `// Feature #20 — <class> skill tree; <N> nodes day-one.` comment.
   **Files:** `assets/skills/fighter.skills.ron` (~50 LOC NEW), `assets/skills/mage.skills.ron` (~80 LOC NEW), `assets/skills/priest.skills.ron` (~80 LOC NEW).
 
-- [ ] **3.4** Register the skill-tree loader + handles in `src/plugins/loading/mod.rs` (~+12 modified LOC). Add:
+- [x] **3.4** Register the skill-tree loader + handles in `src/plugins/loading/mod.rs` (~+12 modified LOC). Add:
   - Import: `use crate::data::SkillTree;`.
   - To `.add_plugins(...)` tuple at line 130-141: `RonAssetPlugin::<SkillTree>::new(&["skills.ron"])`. Order after the `RaceTable` line, with a comment `// Feature #20 — per-class skill trees`.
   - To `DungeonAssets` struct (somewhere around line 100): three new asset-collection fields:
@@ -604,22 +653,45 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
     ```
     **NEVER `match Class { ... }` exhaustively without the `_ =>` wildcard** ([[druum-feature-19-character-creation]] §10).
   - **Asset-load-time validation:** `add_systems(OnExit(GameState::Loading), validate_skill_trees_on_load)`. The system reads each loaded tree via the handle and runs `validate_no_cycles + clamp_skill_tree`; logs at `error!` on cycle. (~+30 LOC for the system.) Failed trees are kept but emptied — the Guild paint shows "(skill tree unavailable: cycle detected)".
+
+    **Cat-C-3 decision (locked): validator scope is CYCLES + CLAMP ONLY.** The validator does NOT walk `NodeGrant::LearnSpell(SpellId)` references against `SpellDb` at load time. Reasons:
+
+    1. **Single source of truth for missing-spell handling.** Bogus `SpellId` strings in `NodeGrant::LearnSpell` flow through `handle_guild_skills_unlock` into the character's `KnownSpells` component without complaint. They surface at the natural point of consumption — the Phase 3 `SpellMenu` painter — where the `WarnedMissingSpells: HashSet<(SpellId, Entity)>` resource warn-once-per-`(spell, character)` mechanism handles them per Q9. Adding a load-time check would create a second warning site with different semantics (per-asset-id vs per-character-instance), and asset hot-reload would muddle which copy is canonical.
+    2. **Authoring-error visibility is preserved.** A cycle is a structural error (the tree cannot be traversed at all); a bogus `LearnSpell("typo")` is a content error (the tree is fine; the unlock just grants a no-op spell). The structural error must fail-fast because the painter would otherwise loop; the content error has a graceful degradation path (warn-once + filter).
+    3. **Asset hot-reload friendliness.** If a designer renames `halito` → `dagger_throw_fire` mid-session, the load-time validator would crash on the cycle check pass; the Phase 3 painter just shows the renamed spell with a one-shot warning on first reference per character.
+
+    **Concretely:** `validate_skill_trees_on_load` runs *only* `validate_no_cycles` (DAG correctness via Kahn's) + `clamp_skill_tree` (size caps). It does NOT iterate `nodes.iter().filter_map(|n| match &n.grant { NodeGrant::LearnSpell(id) => Some(id), _ => None })` and check against `SpellDb`. The Phase 3 SpellMenu painter (Step 2.6) IS responsible for the warn-once filter on `KnownSpells` references — that's where the user-facing degradation lands.
   **Files:** `src/plugins/loading/mod.rs` (+12 modified LOC for handles + ~+30 LOC for the validation system).
 
-- [ ] **3.5** Create `src/plugins/town/guild_skills.rs` (~+250 new LOC, NEW). Top-of-file doc-comment cites plan #20 + the Guild_create sibling-split pattern from #19. Define:
+- [x] **3.5** Create `src/plugins/town/guild_skills.rs` (~+270 new LOC, NEW — increased from +250 to accommodate Cat-C-1 4-state painter's `node_state` pure fn + 2 unit tests). Top-of-file doc-comment cites plan #20 + the Guild_create sibling-split pattern from #19. Define:
   - Imports paralleling `guild_create.rs`.
   - `pub fn paint_guild_skills(...) -> Result` (read-only) — gated `GuildMode::Skills`. Layout:
     - **Top header:** "Guild — Skill Trees" + `{gold.0} Gold` right (per Guild's existing header pattern).
     - **Left panel:** active party roster (sorted by `(PartySlot, Entity)`); cursor-highlighted; shows `name (Lv{level}, {unspent}/{total} SP)`.
     - **Right panel:** for the cursor-selected party member's class, render the per-class `SkillTree`. Sort nodes by `(prereq_depth, id)` where prereq_depth = depth-from-root in DAG (computed via a closed-form pure fn `node_depth(tree, node) -> u32` that iterates prerequisites' `node_depth + 1` recursively, memoised in a local `HashMap`). Visually:
       ```
-      [✓] Might          Lv1 1SP — +2 STR
-      [✓] Endurance      Lv1 1SP — +2 VIT
-      [ ] Iron Gut       Lv3 1SP — Resist Poison    (req: Endurance) — cursor here
-      [ ] Vigilance      Lv3 1SP — Resist Sleep     (req: Endurance) — locked: prereq not met
-      [ ] Steel Nerve    Lv7 2SP — Resist Paralysis (req: Vigilance) — locked
+      [✓] Might          Lv1 1SP — +2 STR                                           (unlocked)
+      [✓] Endurance      Lv1 1SP — +2 VIT                                           (unlocked)
+      [ ] Iron Gut       Lv3 1SP — Resist Poison    (req: Endurance) — cursor here  (can unlock now)
+      [ ] Vigilance      Lv3 1SP — Resist Sleep     (req: Endurance)                (need 1 more SP)  ← yellow
+      [ ] Steel Nerve    Lv7 2SP — Resist Paralysis (req: Vigilance)                (locked: prereq)
       ```
-      where `[✓]` = unlocked (in `UnlockedNodes`), `[ ]` = locked. Color-code: green for "can unlock now" (per `can_unlock_node`), grey for "locked", green-fill for unlocked.
+      where `[✓]` = unlocked (in `UnlockedNodes`), `[ ]` = locked.
+
+      **Cat-C-1 decision (locked):** Use a **4-state palette** to distinguish "can-unlock-now" from "SP-insufficient but otherwise ready". This helps SP-save planning — a user looking at the tree can tell at a glance which nodes are reachable by saving the next few level-ups vs which are gated by prerequisites or class-level. The four states are determined by inspecting `can_unlock_node`'s `SkillError` return:
+
+      | State | Visual | Condition | `can_unlock_node` return |
+      |---|---|---|---|
+      | **Unlocked** | `egui::Color32::from_rgb(120, 200, 120)` (soft green fill on row) + `[✓]` checkbox | `unlocked.has(&node.id)` | n/a — skip the call |
+      | **Can unlock now** | `egui::Color32::from_rgb(180, 240, 180)` (bright green text) + `[ ]` checkbox | `can_unlock_node(node, experience, unlocked).is_ok()` | `Ok(())` |
+      | **SP-insufficient (otherwise met)** | `egui::Color32::from_rgb(230, 200, 100)` (warm yellow text) + `[ ]` checkbox | prereq + level met but `experience.unspent_skill_points < node.cost` | `Err(SkillError::Insufficient)` |
+      | **Locked** | `egui::Color32::from_rgb(140, 140, 140)` (dim grey text) + `[ ]` checkbox | prereq missing, below min-level, already unlocked, or cap-reached | `Err(SkillError::{BelowMinLevel, MissingPrerequisite, AlreadyUnlocked, CapReached})` |
+
+      Reason a column "(need N more SP)" / "(req: Endurance)" / "(need Lv5)" gloss can be derived from the same `SkillError` variant — display this in parentheses at row's end. This makes the painter pure-functional in `(node, experience, unlocked)`; no additional state required.
+
+      **Implementation hint:** factor a private `fn node_state(node: &SkillNode, experience: &Experience, unlocked: &UnlockedNodes) -> NodeState` returning `enum NodeState { Unlocked, CanUnlock, SpInsufficient, Locked(SkillError) }`. The painter then dispatches color + gloss text on `NodeState`. This pure fn is unit-testable independent of egui — adds **2 new unit tests** (`node_state_returns_sp_insufficient_when_prereq_met_but_sp_short`, `node_state_returns_can_unlock_when_all_conditions_met`) on top of the existing 5 integration tests.
+
+      **Test-count delta:** Step 3.5's integration-test count rises from **5 to 7** (2 new pure-fn unit tests for `node_state`). Phase 2 total: 23 → **25 new tests** (8 `data/skills.rs` + 8 `party/skills.rs` + 5 + **2 new** `guild_skills.rs` + 1 progression + 1 integration).
     - **Footer:** `"[Up/Down] Member  |  [Left/Right] Node cursor  |  [Enter] Unlock  |  [Esc] Back"`.
     - **Empty-class fallback:** if the cursor-member's class has no skill tree (e.g., Thief), display `"(No skill tree authored for {class:?})"`.
   - `pub fn handle_guild_skills_input(...)` — gated on `guild_state.mode == GuildMode::Skills`. Branches:
@@ -640,15 +712,15 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
     7. Push toast on success.
   - Add a new field to `GuildState` in `guild.rs:97-103`: `pub node_cursor: usize` (~+1 modified LOC). Reset to 0 on entering `GuildMode::Skills`.
   - 3-5 integration tests (see Verification).
-  **Files:** `src/plugins/town/guild_skills.rs` (+250 new LOC NEW), `src/plugins/town/guild.rs` (+1 modified LOC for `node_cursor` field).
+  **Files:** `src/plugins/town/guild_skills.rs` (+270 new LOC NEW — includes `node_state` pure fn + 2 unit tests for Cat-C-1 4-state painter), `src/plugins/town/guild.rs` (+1 modified LOC for `node_cursor` field).
 
-- [ ] **3.6** Extend `GuildMode` enum with `Skills` variant (~+3 modified LOC). At `src/plugins/town/guild.rs:104-126`, APPEND `Skills` after `CreateConfirm`. Update the `mode_label` match in `paint_guild` at line 166-175 to add `GuildMode::Skills => "Guild — Skill Trees"`. Update the painter's CentralPanel-skip block at line 186-194 to ALSO skip on `GuildMode::Skills` (since `paint_guild_skills` paints its own CentralPanel).
+- [x] **3.6** Extend `GuildMode` enum with `Skills` variant (~+3 modified LOC). At `src/plugins/town/guild.rs:104-126`, APPEND `Skills` after `CreateConfirm`. Update the `mode_label` match in `paint_guild` at line 166-175 to add `GuildMode::Skills => "Guild — Skill Trees"`. Update the painter's CentralPanel-skip block at line 186-194 to ALSO skip on `GuildMode::Skills` (since `paint_guild_skills` paints its own CentralPanel).
   **Files:** `src/plugins/town/guild.rs` (+3 modified LOC).
 
-- [ ] **3.7** Add entry-point keybind in existing `handle_guild_input` at `src/plugins/town/guild.rs:254-295` (~+8 modified LOC). When `guild_state.mode == GuildMode::Roster` AND `actions.just_pressed(&MenuAction::PrevTarget)` (the `[` key — already bound at `input/mod.rs:76`, currently used as a no-op in Roster), switch to `guild_state.mode = GuildMode::Skills`; reset `cursor = 0`, `node_cursor = 0`. Document via a comment: `// Feature #20 — '[' enters Skills mode from Roster (NextTarget=']' enters CreateRace per #19).`. Also append `"  |  [[] Skills"` to the painter's footer at line 152 (the Roster footer string).
+- [x] **3.7** Add entry-point keybind in existing `handle_guild_input` at `src/plugins/town/guild.rs:254-295` (~+8 modified LOC). When `guild_state.mode == GuildMode::Roster` AND `actions.just_pressed(&MenuAction::PrevTarget)` (the `[` key — already bound at `input/mod.rs:76`, currently used as a no-op in Roster), switch to `guild_state.mode = GuildMode::Skills`; reset `cursor = 0`, `node_cursor = 0`. Document via a comment: `// Feature #20 — '[' enters Skills mode from Roster (NextTarget=']' enters CreateRace per #19).`. Also append `"  |  [[] Skills"` to the painter's footer at line 152 (the Roster footer string).
   **Files:** `src/plugins/town/guild.rs` (+8 modified LOC).
 
-- [ ] **3.8** Register `paint_guild_skills` + handlers + plugin wiring in `src/plugins/town/mod.rs` (~+10 modified LOC). Mirror the #19 wiring pattern for `guild_create`. Add `pub mod guild_skills;` and re-export the painter/handlers. Inside `TownPlugin::build`, add to the `EguiPrimaryContextPass` tuple:
+- [x] **3.8** Register `paint_guild_skills` + handlers + plugin wiring in `src/plugins/town/mod.rs` (~+10 modified LOC). Mirror the #19 wiring pattern for `guild_create`. Add `pub mod guild_skills;` and re-export the painter/handlers. Inside `TownPlugin::build`, add to the `EguiPrimaryContextPass` tuple:
   ```rust
   paint_guild_skills.run_if(in_state(TownLocation::Guild).and(in_guild_mode(GuildMode::Skills))),
   ```
@@ -660,7 +732,7 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
   Also add `OnExit(TownLocation::Guild)` reset for any in-flight skill-spend cursor.
   **Files:** `src/plugins/town/mod.rs` (+10 modified LOC).
 
-- [ ] **3.9** Create `tests/skill_tree_loads.rs` (~+90 new LOC, NEW). Mirror `tests/class_table_loads.rs` (REFERENCE FILE). Load all 3 per-class trees; for each tree assert:
+- [x] **3.9** Create `tests/skill_tree_loads.rs` (~+90 new LOC, NEW). Mirror `tests/class_table_loads.rs` (REFERENCE FILE). Load all 3 per-class trees; for each tree assert:
   - `nodes.len() > 0` (specifically: fighter ~6, mage ~8, priest ~8).
   - `class_id` matches (e.g., `"Fighter"`).
   - `validate_no_cycles(&tree).is_ok()` — fail-fast on any authoring cycle.
@@ -763,6 +835,18 @@ pub const MAX_SKILL_NODE_MIN_LEVEL: u32 = 99;
 
 8. **Crit ceiling assertion in `spell_damage_caps_at_max_spell_damage` test.** The test asserts `damage <= MAX_SPELL_DAMAGE * 1.5 + 1` (≈1499). With accuracy=0, crit_chance=0, so crits never fire in that test. The `+ 1` is included as floating-point rounding guard per the existing `damage.rs` test precedent.
 
+**Phase 2 discoveries (Steps 2.1–2.5 + 3.1–3.9):**
+
+9. **Execution order differs from step numbering.** Steps 3.1 (data/skills.rs) and 3.2 (data/mod.rs) had to be executed before Steps 2.1 (party/skills.rs) because `SkillNode` and `NodeGrant` are defined in skills.rs and imported by party/skills.rs. The plan's "EXECUTION ORDER" note already documented this; implementer followed it.
+
+10. **DungeonAssets landmine — 7 test fixtures required update.** Adding 3 new `Handle<SkillTree>` fields to `DungeonAssets` breaks all struct literals in tests that don't use `..Default::default()` (since `Handle<T>` is not `#[derive(Default)]` from the user side). Updated all 7 fixtures: `tests/dungeon_movement.rs`, `tests/dungeon_geometry.rs`, `src/plugins/dungeon/tests.rs`, `src/plugins/dungeon/features.rs`, `src/plugins/ui/minimap.rs`, `src/plugins/combat/encounter.rs`, `src/plugins/combat/turn_manager.rs` — each gets `fighter_skills: Handle::default(), mage_skills: Handle::default(), priest_skills: Handle::default()`.
+
+11. **Experience struct literal breakage.** Adding `unspent_skill_points` and `total_skill_points_earned` to `Experience` broke all struct literals that didn't cover all fields. Fixed by adding `..Default::default()` to: `src/plugins/town/guild.rs:486-490` (handle_guild_recruit), `src/plugins/party/progression.rs:876-880` (xp_threshold_triggers_level_up test), `src/plugins/party/progression.rs:972-976` (level_up_awards_skill_points_per_const test).
+
+12. **node_cursor sorted order in tests.** The `unlock_node_adds_to_unlocked_set_and_deducts_skill_point` test initially would have used `node_cursor = 0` expecting `root_node`. But `sorted_nodes` sorts by `(depth, id)`: all four depth-0 nodes sort alphabetically giving `level_gated(0), root_node(1), stat_node(2)` and `spell_node` at depth 1 goes last. Used `node_cursor = 1` for `root_node` in the test.
+
+13. **Unused `mut exp` binding in test body.** The `unlock_node_learn_spell_grant_appends_known_spells` test had a dead code block `{ let mut exp = ...; /* comment */ }`. Removed the block; comment preserved inline.
+
 ## Verification
 
 All 6 quality gates MUST pass (zero warnings, zero failures):
@@ -818,6 +902,8 @@ All 6 quality gates MUST pass (zero warnings, zero failures):
 | `src/plugins/town/guild_skills.rs` | `unlock_node_stat_boost_writes_equipment_changed_event` | integration |
 | `src/plugins/town/guild_skills.rs` | `unlock_node_rejects_missing_prereq_with_toast` | integration |
 | `src/plugins/town/guild_skills.rs` | `unlock_node_rejects_when_below_min_level_with_toast` | integration |
+| `src/plugins/town/guild_skills.rs` | `node_state_returns_can_unlock_when_all_conditions_met` | unit (Cat-C-1) |
+| `src/plugins/town/guild_skills.rs` | `node_state_returns_sp_insufficient_when_prereq_met_but_sp_short` | unit (Cat-C-1) |
 | `src/plugins/party/progression.rs` | `level_up_awards_skill_points_per_const` (EXTEND existing test) | integration |
 | `tests/spell_db_loads.rs` | `spell_db_loads_through_ron_asset_plugin` | integration |
 | `tests/skill_tree_loads.rs` | `skill_trees_load_and_validate_no_cycles` | integration |
@@ -826,7 +912,7 @@ All 6 quality gates MUST pass (zero warnings, zero failures):
 
 - [ ] `cargo test --lib spell` — Automatic — covers the 6 `data/spells.rs` tests, 5 `spell_cast.rs` tests, 7 `turn_manager.rs::cast_spell_*` tests, and the extended `silence_blocks_spell_menu`. ~19 tests.
 - [ ] `cargo test --lib skills` — Automatic — covers the 8 `data/skills.rs` tests + 8 `party/skills.rs` tests. ~16 tests.
-- [ ] `cargo test --lib guild_skills` — Automatic — covers the 5 `guild_skills.rs` integration tests.
+- [ ] `cargo test --lib guild_skills` — Automatic — covers the 5 `guild_skills.rs` integration tests + 2 `node_state` pure-fn unit tests (Cat-C-1 4-state painter).
 - [ ] `cargo test --lib level_up_awards_skill_points` — Automatic — covers the extended progression test.
 - [ ] `cargo test --test spell_db_loads` — Automatic — RON-asset-pipeline integration smoke.
 - [ ] `cargo test --test skill_tree_loads` — Automatic — RON-asset-pipeline integration smoke + DAG validation runs in real loader.

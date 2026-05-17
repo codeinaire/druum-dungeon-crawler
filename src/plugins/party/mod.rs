@@ -12,6 +12,7 @@ use crate::plugins::state::GameState;
 pub mod character;
 pub mod inventory;
 pub mod progression;
+pub mod skills;
 
 pub use character::{
     ActiveEffect, BaseStats, CharacterName, Class, DerivedStats, Equipment, Experience,
@@ -26,9 +27,14 @@ pub use inventory::{
 };
 
 pub use progression::{
-    AllocError, CombatVictoryEvent, CreateError, ProgressionRng, StatGains,
+    AllocError, CombatVictoryEvent, CreateError, ProgressionRng, SKILL_POINTS_PER_LEVEL, StatGains,
     allocate_bonus_pool, can_create_class, level_cap, level_up,
     recompute_xp_to_next_level, roll_bonus_pool, xp_for_level,
+};
+
+pub use skills::{
+    KnownSpells, UnlockedNodes, WarnedMissingSpells, SkillError,
+    allocate_skill_point_pure, can_unlock_node, learn_spell_pure,
 };
 
 pub struct PartyPlugin;
@@ -57,6 +63,11 @@ impl Plugin for PartyPlugin {
             .register_type::<ActiveEffect>()
             .register_type::<StatusEffectType>()
             .register_type::<PartySize>();
+
+        // Feature #20 — skill tree components + warn-once missing-spell registry.
+        app.init_resource::<WarnedMissingSpells>()
+            .register_type::<KnownSpells>()
+            .register_type::<UnlockedNodes>();
 
         // Feature #12 — inventory & equipment data layer. UI lives in #25.
         // `init_asset::<ItemAsset>()` creates the `Assets<ItemAsset>` resource

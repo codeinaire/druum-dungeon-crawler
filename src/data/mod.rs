@@ -6,6 +6,7 @@
 //! - `enemies` — `EnemyDb` (Feature #15)
 //! - `classes` — `ClassTable`, `ClassDef` (Feature #11)
 //! - `races` — `RaceTable`, `RaceData` (Feature #19)
+//! - `skills` — `SkillTree`, `SkillNode`, `NodeGrant` (Feature #20)
 //! - `spells` — `SpellDb`, `SpellAsset`, `SpellEffect` (Feature #20 — spells registry)
 //! - `town` — `ShopStock`, `RecruitPool`, `TownServices` (Feature #18)
 
@@ -15,6 +16,7 @@ pub mod enemies;
 pub mod encounters;
 pub mod items;
 pub mod races;
+pub mod skills;
 pub mod spells;
 pub mod town;
 
@@ -27,6 +29,11 @@ pub use encounters::{EncounterEntry, EncounterTable, EnemyGroup, EnemySpec};
 pub use enemies::EnemyDb;
 pub use items::{ItemAsset, ItemDb, ItemStatBlock};
 pub use races::{RaceData, RaceTable};
+pub use skills::{
+    CycleError, MAX_SKILL_NODE_COST, MAX_SKILL_NODE_MIN_LEVEL, MAX_SKILL_TREE_NODES,
+    NodeGrant, NodeId, SKILL_POINTS_PER_LEVEL, SkillNode, SkillTree,
+    clamp_skill_tree, validate_no_cycles,
+};
 pub use spells::{
     SpellAsset, SpellDb, SpellEffect, SpellSchool, SpellTarget,
     KNOWN_SPELLS_MAX, MAX_SPELL_DAMAGE, MAX_SPELL_DURATION,
